@@ -4,6 +4,13 @@
   "description": "Validated loopback protocol shared by the DSH Codex bridge plugin and MCP server",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bwndlct/dsh-codex-bridge.git",
+    "directory": "packages/protocol"
+  },
+  "homepage": "https://github.com/bwndlct/dsh-codex-bridge#readme",
+  "bugs": { "url": "https://github.com/bwndlct/dsh-codex-bridge/issues" },
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

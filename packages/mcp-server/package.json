@@ -4,6 +4,13 @@
   "description": "Stdio MCP server that delegates Codex tasks to official DeepSeek Harness Desktop",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bwndlct/dsh-codex-bridge.git",
+    "directory": "packages/mcp-server"
+  },
+  "homepage": "https://github.com/bwndlct/dsh-codex-bridge#readme",
+  "bugs": { "url": "https://github.com/bwndlct/dsh-codex-bridge/issues" },
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "bin": { "dsh-codex-bridge-mcp": "./lib/bin.js" },
   "main": "./lib/index.js",

@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/bwndlct/dsh-codex-bridge.git" },
+  "homepage": "https://github.com/bwndlct/dsh-codex-bridge#readme",
+  "bugs": { "url": "https://github.com/bwndlct/dsh-codex-bridge/issues" },
   "packageManager": "pnpm@11.21.0",
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "scripts": {

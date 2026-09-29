@@ -4,6 +4,13 @@
   "description": "Loopback Codex delegation bridge for official DeepSeek Harness Desktop 0.2.0-rc.1",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bwndlct/dsh-codex-bridge.git",
+    "directory": "packages/dsh-plugin"
+  },
+  "homepage": "https://github.com/bwndlct/dsh-codex-bridge#readme",
+  "bugs": { "url": "https://github.com/bwndlct/dsh-codex-bridge/issues" },
   "engines": { "node": "^22.19.0 || >=24.0.0" },
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
