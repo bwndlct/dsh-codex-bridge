@@ -1,0 +1,11 @@
+packages:
+  - packages/*
+
+autoInstallPeers: false
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/dsh-api-session-controller@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-brand@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-deque@0.2.0-rc.1'
+  - '@deepseek-ai/dsh-workspace@0.2.0-rc.1'

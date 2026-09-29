@@ -1,0 +1,30 @@
+{
+  "name": "@dsh-codex-bridge/mcp-server",
+  "version": "0.1.0",
+  "description": "Stdio MCP server that delegates Codex tasks to official DeepSeek Harness Desktop",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "bin": { "dsh-codex-bridge-mcp": "./lib/bin.js" },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "README.md", "LICENSE"],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "build": "node ../../scripts/build-package.mjs mcp",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@dsh-codex-bridge/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "zod": "^4.4.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@dsh-codex-bridge/protocol",
+  "version": "0.1.0",
+  "description": "Validated loopback protocol shared by the DSH Codex bridge plugin and MCP server",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "LICENSE"],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": { "zod": "^4.4.3" },
+  "devDependencies": { "@types/node": "^22.20.1", "typescript": "^5.9.3", "vitest": "^3.2.4", "yaml": "^2.9.1" }
+}

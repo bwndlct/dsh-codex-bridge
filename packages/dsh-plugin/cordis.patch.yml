@@ -1,0 +1,6 @@
+- insert:
+    - id: codex-bridge
+      name: '@dsh-codex-bridge/dsh-plugin'
+      inject:
+        - sessionController
+        - workspaceRegistry
