@@ -21,12 +21,12 @@ Nothing starts Harness, calls a provider directly, or reads or edits persisted s
 
 ## Desktop API chain
 
-1. MCP sends absolute `cwd`; omission resolves to its `process.cwd()`.
+1. MCP requires the current Codex task's absolute `cwd`; it never substitutes its process directory or a fixed default Workspace.
 2. The Host canonicalizes `cwd` and requires an existing directory.
-3. `workspaceRegistry.resolveByPath(cwd)` is read-only. A match creates with `workspaceId`; otherwise creation uses canonical `cwd`. The bridge never creates a Workspace.
-4. Omitted `model` makes no catalog or selection call; Desktop inherits its current model selection directly. An explicit override calls `sessionController.modelCatalog()` and must exactly match a catalog `provider/model` before any Session is created.
-5. After creation, an override calls `selectModel`; then `prompt` admits one queued text item with a random request id.
-6. Delegation returns `sessionId`, status, canonical `cwd`, Workspace details, and the override selection when one was explicitly accepted, immediately after admission.
+3. The Host resolves the Workspace by canonical path, then uses `workspaceRegistry.create(cwd)` when none exists. This official API reuses concurrent registrations for the same path and gives new Workspaces the directory name. Session creation always uses `workspaceId`, so its actual directory and Desktop grouping agree. Registration failure aborts delegation; there is no ungrouped fallback.
+4. Omitting both `model` and `reasoningEffort` makes no catalog or selection call; Desktop inherits its current selection directly. With either parameter, `sessionController.modelCatalog()` validates the model and effort before any Workspace or Session is created. Effort alone uses the catalog's current default model; a missing default or unsupported effort fails explicitly.
+5. After creation, a requested model or effort calls `selectModel`; then `prompt` admits one queued text item with a random request id. The official `selectModel` API also saves the selection as the Host default in the background.
+6. Delegation returns `sessionId`, status, canonical `cwd`, the Workspace id, and the accepted model selection when one was requested. `workspace.matched` means a registration existed at lookup time; it can be false while `workspace.id` identifies the newly registered Workspace. Effort alone reports model `source: "default"`.
 7. If selection or prompt fails after creation, structured error details contain `sessionId`. The visible Desktop Session is retained for recovery.
 8. Cancellation reports bridge acceptance separately from raw DSH `{ accepted: true }`. It does not claim a DSH cancelled enum and never deletes history.
 
@@ -87,6 +87,10 @@ default_tools_approval_mode = "approve"
 [mcp_servers.dsh.env]
 DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 ```
+
+`dsh_delegate` now requires `cwd` on every call. Codex must pass its current task's absolute project directory, including when using a different project or worktree. Existing callers that omit `cwd` must be updated; `DSH_DEFAULT_WORKSPACE_CWD` no longer redirects delegation.
+
+For example, delegate with `{ "task": "Run the project tests", "cwd": "/absolute/path/to/current-project", "reasoningEffort": "max" }`. This reuses or registers that directory's Desktop Workspace and applies `max` to the Host current default model if supported.
 
 Pin an absolute `node`; do not rely on `PATH` resolution. `default_tools_approval_mode = "approve"` is required for non-interactive runs: under the default policy `codex exec` fails with `MCP tool call requires approval, but approval policy is never`, and `"auto"` is not sufficient for these tools. In interactive Codex, keep `"approve"` for silent delegation or drop the key to be prompted on every call.
 

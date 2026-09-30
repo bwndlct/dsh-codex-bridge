@@ -36,13 +36,42 @@ describe('MCP framing', () => {
       expect(tools.tools.map(tool => tool.name)).toEqual([
         'dsh_delegate', 'dsh_status', 'dsh_wait', 'dsh_follow', 'dsh_cancel',
       ])
-      const response = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work' } })
+      const response = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: process.cwd() } })
       expect(response.structuredContent).toEqual({ sessionId: 'session-1', status: 'queued', guidance: 'Use dsh_wait.' })
       expect(response.content).toEqual([{ type: 'text', text: JSON.stringify(response.structuredContent) }])
       expect(call).toHaveBeenCalledWith('/v1/delegate', { task: 'work', cwd: resolve(process.cwd()) })
+      await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: process.cwd(), model: 'opencodex/dsh-zhipuai/glm-5.3', reasoningEffort: 'max' } })
+      expect(call).toHaveBeenLastCalledWith('/v1/delegate', {
+        task: 'work', cwd: resolve(process.cwd()), model: 'opencodex/dsh-zhipuai/glm-5.3', reasoningEffort: 'max',
+      })
     } finally {
       await client.close()
       await server.close()
+    }
+  })
+
+  it('requires an absolute task cwd and never redirects it to a configured default', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bridge-default-workspace-'))
+    vi.stubEnv('DSH_DEFAULT_WORKSPACE_CWD', directory)
+    const call = vi.fn(async () => ({ sessionId: 'session-1', status: 'queued' }))
+    const server = createMcpServer({ call } as unknown as BridgeClient)
+    const client = new Client({ name: 'test-client', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+      const missing = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work' } })
+      const relative = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: '.' } })
+      expect(missing.isError).toBe(true)
+      expect(relative.isError).toBe(true)
+      expect(call).not.toHaveBeenCalled()
+      await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: tmpdir() } })
+      expect(call).toHaveBeenLastCalledWith('/v1/delegate', { task: 'work', cwd: resolve(tmpdir()) })
+      await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: process.cwd(), reasoningEffort: 'max' } })
+      expect(call).toHaveBeenLastCalledWith('/v1/delegate', { task: 'work', cwd: resolve(process.cwd()), reasoningEffort: 'max' })
+    } finally {
+      await client.close()
+      await server.close()
+      vi.unstubAllEnvs()
     }
   })
 
@@ -75,7 +104,7 @@ describe('MCP framing', () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
     try {
-      const response = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work' } })
+      const response = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: process.cwd() } })
       const expected = { error: { code: 'SESSION_ADMISSION_FAILED', message: 'Session exists.', details: { sessionId: 'session-1' } } }
       expect(response.isError).toBe(true)
       expect(response.structuredContent).toEqual(expected)

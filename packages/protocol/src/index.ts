@@ -20,6 +20,7 @@ export const delegateRequestSchema = z.object({
   task: z.string().trim().min(1, 'task must be nonempty'),
   cwd: z.string().min(1),
   model: z.string().trim().min(1).optional(),
+  reasoningEffort: z.string().trim().min(1).optional(),
 }).strict()
 export type DelegateRequest = z.infer<typeof delegateRequestSchema>
 
@@ -81,6 +82,7 @@ export const delegateResponseSchema = z.object({
   model: z.object({
     provider: z.string(),
     model: z.string(),
+    reasoningEffort: z.string().optional(),
     source: z.enum(['default', 'override']),
   }).strict().optional(),
   guidance: z.string(),

@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
@@ -42,18 +42,20 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   const server = new McpServer({ name: 'dsh-codex-bridge', version: '0.1.0' })
 
   server.registerTool('dsh_delegate', {
-    description: 'Delegate a task to a new session in the running DSH Desktop Host. Returns immediately after prompt admission.',
+    description: 'Delegate a task to a new session in the running DSH Desktop Host. Always pass the current Codex task working directory as cwd; its DSH Workspace is reused or registered. Returns immediately after prompt admission.',
     inputSchema: z.object({
       task: z.string().min(1).describe('Nonempty task for the DSH Host model.'),
-      cwd: z.string().min(1).optional().describe('Working directory. Defaults to this MCP process cwd.'),
+      cwd: z.string().min(1).refine(isAbsolute, 'cwd must be absolute').describe('Required absolute working directory of the current Codex task, not the MCP process directory.'),
       model: z.string().min(1).optional().describe('Optional exact provider/model catalog selection. Omit to inherit the Host current model.'),
+      reasoningEffort: z.string().min(1).optional().describe('Optional exact catalog effort, such as max. Applies to the Host current default model when model is omitted.'),
     }),
-  }, async ({ task, cwd, model }) => {
+  }, async ({ task, cwd, model, reasoningEffort }) => {
     try {
       const response = await client.call<DelegateResponse>('/v1/delegate', {
         task,
-        cwd: resolve(cwd ?? process.cwd()),
+        cwd: resolve(cwd),
         ...(model === undefined ? {} : { model }),
+        ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       })
       return result(response)
     } catch (error) { return failure(error) }

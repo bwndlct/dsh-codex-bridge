@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import {
   BridgeError,
   type CancelResponse,
@@ -31,19 +31,39 @@ export class BridgeRuntime {
     const task = request.task.trim()
     if (task.length === 0) throw new BridgeError('INVALID_TASK', 'task must be nonempty', 400)
     const cwd = await this.resolveDirectory(request.cwd)
-    const workspace = await this.ctx.workspaceRegistry.resolveByPath(cwd)
-    const selection = request.model === undefined
-      ? undefined
-      : { ...this.resolveModel(await this.ctx.sessionController.modelCatalog(), request.model), source: 'override' as const }
+    let selection: DelegateResponse['model']
+    if (request.model !== undefined || request.reasoningEffort !== undefined) {
+      const catalog = await this.ctx.sessionController.modelCatalog()
+      const model = request.model ?? (catalog.default === undefined
+        ? undefined
+        : `${catalog.default.provider}/${catalog.default.model}`)
+      if (model === undefined) {
+        throw new BridgeError('DEFAULT_MODEL_UNAVAILABLE', 'The Host has no default model for reasoningEffort; specify model explicitly.', 400)
+      }
+      selection = {
+        ...this.resolveModel(catalog, model, request.reasoningEffort),
+        source: request.model === undefined ? 'default' : 'override',
+      }
+    }
     this.tracker.ensureCapacity()
-    const created = workspace === undefined
-      ? await this.ctx.sessionController.create({ cwd })
-      : await this.ctx.sessionController.create({ workspaceId: workspace.id })
+    const matched = await this.ctx.workspaceRegistry.resolveByPath(cwd)
+    let workspace = matched
+    if (workspace === undefined) {
+      try {
+        workspace = await this.ctx.workspaceRegistry.create(cwd)
+      } catch (error) {
+        throw new BridgeError('WORKSPACE_REGISTRATION_FAILED', 'The task directory could not be registered as a DSH Workspace.', 502, {
+          cwd, cause: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+    const created = await this.ctx.sessionController.create({ workspaceId: workspace.id })
     this.tracker.start(created.sessionId)
     try {
-      if (selection?.source === 'override') {
-        const { provider, model } = selection
-        await this.ctx.sessionController.selectModel({ sessionId: created.sessionId, provider, model })
+      if (selection !== undefined) {
+        const { provider, model, reasoningEffort } = selection
+        await this.ctx.sessionController.selectModel({ sessionId: created.sessionId, provider, model,
+          ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
       }
       await this.ctx.sessionController.prompt({
         requestId: randomUUID(),
@@ -66,8 +86,8 @@ export class BridgeRuntime {
       status: 'queued',
       cwd,
       workspace: {
-        matched: workspace !== undefined,
-        ...(workspace === undefined ? {} : { id: workspace.id }),
+        matched: matched !== undefined,
+        id: workspace.id,
       },
       ...(selection === undefined ? {} : { model: selection }),
       guidance: 'Prompt admitted. Use dsh_wait for bounded waiting, dsh_status for current Host state, or dsh_follow for incremental events.',
@@ -112,6 +132,7 @@ export class BridgeRuntime {
   }
 
   private async resolveDirectory(input: string): Promise<string> {
+    if (!isAbsolute(input)) throw new BridgeError('INVALID_CWD', 'cwd must be the absolute Codex task directory', 400)
     const absolute = resolve(input)
     let canonical: string
     try {
@@ -129,7 +150,9 @@ export class BridgeRuntime {
     return canonical
   }
 
-  private resolveModel(catalog: ModelCatalog, value: string): { readonly provider: string; readonly model: string } {
+  private resolveModel(catalog: ModelCatalog, value: string, reasoningEffort?: string): {
+    readonly provider: string; readonly model: string; readonly reasoningEffort?: string
+  } {
     const slash = value.indexOf('/')
     if (slash <= 0 || slash === value.length - 1) {
       throw new BridgeError('INVALID_MODEL', 'model must use exact provider/model syntax', 400)
@@ -137,12 +160,18 @@ export class BridgeRuntime {
     const provider = value.slice(0, slash)
     const model = value.slice(slash + 1)
     const group = catalog.groups.find(candidate => candidate.id === provider)
-    if (group === undefined || !group.models.some(candidate => candidate.id === model)) {
+    const entry = group?.models.find(candidate => candidate.id === model)
+    if (entry === undefined) {
       throw new BridgeError('MODEL_NOT_FOUND', `Model "${value}" is not an exact available catalog entry.`, 400, {
         available: catalog.groups.flatMap(candidate => candidate.models.map(entry => `${candidate.id}/${entry.id}`)),
       })
     }
-    return { provider, model }
+    if (reasoningEffort !== undefined && !entry.reasoning?.efforts.some(effort => effort.id === reasoningEffort)) {
+      throw new BridgeError('INVALID_REASONING_EFFORT', `Effort "${reasoningEffort}" is not available for model "${value}".`, 400, {
+        available: entry.reasoning?.efforts.map(effort => effort.id) ?? [],
+      })
+    }
+    return { provider, model, ...(reasoningEffort === undefined ? {} : { reasoningEffort }) }
   }
 
   private fsCode(error: unknown): string | undefined {

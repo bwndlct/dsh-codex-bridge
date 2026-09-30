@@ -22,7 +22,7 @@ export interface ModelCatalog {
   }
   readonly groups: readonly {
     readonly id: string
-    readonly models: readonly { readonly id: string }[]
+    readonly models: readonly { readonly id: string; readonly reasoning?: { readonly efforts: readonly { readonly id: string }[] } }[]
   }[]
 }
 
@@ -45,7 +45,7 @@ export interface WireEvent {
 export interface SessionControllerLike {
   create(request: { readonly workspaceId?: string; readonly cwd?: string }): Promise<{ readonly sessionId: string }>
   modelCatalog(): Promise<ModelCatalog>
-  selectModel(request: { readonly sessionId: string; readonly provider: string; readonly model: string }): Promise<unknown>
+  selectModel(request: { readonly sessionId: string; readonly provider: string; readonly model: string; readonly reasoningEffort?: string }): Promise<unknown>
   prompt(request: {
     readonly requestId: string
     readonly sessionId: string
@@ -62,6 +62,7 @@ export interface SessionControllerLike {
 
 export interface WorkspaceRegistryLike {
   resolveByPath(path: string): Promise<{ readonly id: string; readonly path?: string } | undefined>
+  create(path: string): Promise<{ readonly id: string; readonly path: string }>
 }
 
 export interface BridgeContext extends Context {
