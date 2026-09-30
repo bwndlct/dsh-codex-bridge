@@ -2,7 +2,7 @@
 
 [简体中文](<README.md>) · **English**
 
-[![Desktop](https://img.shields.io/badge/Desktop-0.2.0--rc.1-176B63?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
+[![Desktop](https://img.shields.io/badge/Desktop-0.2.0--rc.2-176B63?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B%20%7C%2024%2B-38823C?style=flat-square)](https://nodejs.org/)
 [![MIT](https://img.shields.io/badge/License-MIT-555555?style=flat-square)](<LICENSE>)
 
@@ -14,7 +14,9 @@
 - **Optional model and effort:** inherit the Host model, or specify `model` and `reasoningEffort`.
 - **Trackable tasks:** get a Session ID after admission, with status, incremental events, bounded waiting, and cancellation.
 
-> Supports only official Desktop **`0.2.0-rc.1` / commit `4878cda`**. The bridge never starts Desktop, calls a model provider directly, or reads or edits persisted Session files directly.
+> Supports only official Desktop **`0.2.0-rc.2`**. The bridge never starts Desktop, calls a model provider directly, or reads or edits persisted Session files directly.
+>
+> Upgrading from `0.1.0`? Update both the Desktop plugin and MCP server to `0.2.0`, and pass absolute `cwd` on every delegation. See the [release notes](<CHANGELOG.md>).
 
 ## Quick Start
 
@@ -55,7 +57,7 @@ default_tools_approval_mode = "approve"
 DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 ```
 
-`DSH_HOME` must match Desktop; omit it when using the default location. `"approve"` allows delegation without per-call prompts and is required for non-interactive `codex exec`. Remove it in interactive mode to approve each call individually.
+`DSH_HOME` must match Desktop; omit it when using the default location. In the manually tested Codex CLI `0.155.1`, non-interactive `codex exec` required `"approve"` to call these tools; check the MCP approval rules for other versions. Remove it in interactive mode to approve each call individually.
 
 ## Delegate a Task
 
@@ -65,12 +67,12 @@ Call `dsh_delegate`, **always passing the current Codex task's absolute `cwd`**:
 {
   "task": "Run the project tests and summarize the results",
   "cwd": "/absolute/path/to/current-project",
-  "model": "opencodex/dsh-zhipuai/glm-5.3",
+  "model": "your-provider/glm-5.3",
   "reasoningEffort": "max"
 }
 ```
 
-The model route and effort must match the Host catalog. Omit `model` to inherit the current model; `reasoningEffort` also works on its own. A default-directory environment setting no longer substitutes for `cwd`.
+Replace the `your-provider` placeholder with the provider ID configured in Desktop. The model route and effort must match the Host catalog. Omit `model` to inherit the current model; `reasoningEffort` also works on its own. A default-directory environment setting no longer substitutes for `cwd`.
 
 Use the returned `sessionId` with `dsh_wait`, or open the Session in Desktop.
 
@@ -89,7 +91,7 @@ Use the returned `sessionId` with `dsh_wait`, or open the Session in Desktop.
 - **Local connections only:** HTTP binds to `127.0.0.1`, requires Bearer authentication, and writes discovery with mode `0600`.
 - **Cursors are not durable history:** plugin reloads invalidate old cursors. Workspace registration failures do not fall back to an ungrouped Session.
 
-[Configuration, protocol, and troubleshooting](<docs/reference.md>) · [Host plugin](<packages/dsh-plugin/README.md>) · [MCP server](<packages/mcp-server/README.md>) · [Report an issue](https://github.com/bwndlct/dsh-codex-bridge/issues)
+[Configuration, protocol, and troubleshooting (Chinese)](<docs/reference.md>) · [Host plugin](<packages/dsh-plugin/README.md>) · [MCP server](<packages/mcp-server/README.md>) · [Report an issue](https://github.com/bwndlct/dsh-codex-bridge/issues)
 
 ## License
 

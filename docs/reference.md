@@ -6,7 +6,7 @@
 
 ## 安装与发现 / Installation and Discovery
 
-仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.1`，commit `4878cda`。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
+桥接 `0.2.0` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
 
 - 第一次安装：通过 HMR 应用，确认 `application: "applied"`，不把重启作为首次安装步骤。
 - 替换已安装包、加载已安装源码的新模块：可能返回 `restart-required`，重启由操作者决定。
@@ -16,7 +16,7 @@
 
 构建后的插件目录可直接用于 Plugins 页面。若使用压缩包，把插件包放到仓库外的稳定位置再安装。MCP 压缩包包含完整运行代码，解压后用绝对 Node 路径运行其 `package/lib/bin.js`，不依赖私有 protocol 包的发布。
 
-Codex CLI `0.155.1` 曾验证 `dsh_delegate` 与 `dsh_wait` 的调用链。非交互 `codex exec` 使用 `default_tools_approval_mode = "approve"`；默认策略可能报 `MCP tool call requires approval, but approval policy is never`，`"auto"` 不足以替代它。此配置涉及工具授权，应由操作者选择。
+Codex CLI `0.155.1` 的历史人工验证覆盖了 `dsh_delegate` 与 `dsh_wait` 调用链：在该版本的非交互 `codex exec` 中，默认策略曾报 `MCP tool call requires approval, but approval policy is never`，使用 `default_tools_approval_mode = "approve"` 后通过，而 `"auto"` 未解决该问题。仓库没有 Codex CLI 集成测试或版本锁定，其他版本需单独核对。此配置涉及工具授权，应由操作者选择。
 
 ## 委托契约 / Delegation Contract
 
@@ -73,7 +73,20 @@ pnpm pack:mcp
 
 `check` 包含构建、TypeScript 检查与测试；压缩包冒烟测试覆盖插件 patch、导出、可导入性，以及没有未解析的私有 protocol 依赖。自动验证使用临时目录和临时端口，不安装到或重启 Desktop。
 
-人工验收可覆盖：临时项目中的简单文件任务、增量事件与有界等待、取消后保留历史、在 Desktop 继续同一会话、插件不可用时的明确错误。已有验收记录对应旧版本，不作为当前 Workspace 与 effort 行为已实机通过的证明。
+2026-09-30 已在官方 Desktop `0.2.0-rc.2` 上完成桥接 `0.2.0` 实机验收，使用解压后的 MCP 发布包通过 stdio 调用，未绕过 Host 版本检查：
+
+| 项目 | 实测结果 |
+| --- | --- |
+| Plugins 页面安装与即时加载 | 新版插件启用，鉴权健康检查返回 `0.2.0`，无需重启 Desktop |
+| MCP 握手与工具契约 | 握手版本 `0.2.0`，五个工具可见，`cwd` 必填 |
+| Workspace 新建与复用 | 首次注册目录，第二次复用同一 Workspace；两个文件任务均写入指定目录 |
+| 显式模型与 effort | GLM 5.3 / `max` 完成任务，实际 `request/header` 与请求选择一致 |
+| 只传 effort | 继承当时默认的 DeepSeek Flash / `xhigh`，实际请求与返回选择一致；该默认模型不支持的 `max` 被明确拒绝 |
+| 等待与增量事件 | 从执行中等待到持久化 `turn/end`；消费游标后不重复返回事件 |
+| 超时与取消 | 零时限等待返回超时且任务继续运行；取消被 Host 接纳，原始状态转为非运行，会话与事件仍可查询 |
+| 失败边界 | 无鉴权健康检查被拒绝；不存在的目录、不可用模型和不支持的 effort 分别返回明确错误 |
+
+该记录覆盖本次发布的 Workspace 与 effort 行为；第三方插件的功能以及其他 Desktop / Codex CLI 版本不在此验收范围内。
 
 ## 源码导航 / Source Map
 

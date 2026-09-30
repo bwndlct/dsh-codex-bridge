@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import {
+  BRIDGE_VERSION,
   BridgeError,
   MAX_WAIT_MS,
   type CancelResponse,
@@ -39,7 +40,7 @@ function failure(error: unknown): CallToolResult {
 }
 
 export function createMcpServer(client = new BridgeClient()): McpServer {
-  const server = new McpServer({ name: 'dsh-codex-bridge', version: '0.1.0' })
+  const server = new McpServer({ name: 'dsh-codex-bridge', version: BRIDGE_VERSION })
 
   server.registerTool('dsh_delegate', {
     description: 'Delegate a task to a new session in the running DSH Desktop Host. Always pass the current Codex task working directory as cwd; its DSH Workspace is reused or registered. Returns immediately after prompt admission.',

@@ -2,7 +2,7 @@
 
 **简体中文** · [English](<README.en.md>)
 
-[![Desktop](https://img.shields.io/badge/Desktop-0.2.0--rc.1-176B63?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
+[![Desktop](https://img.shields.io/badge/Desktop-0.2.0--rc.2-176B63?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B%20%7C%2024%2B-38823C?style=flat-square)](https://nodejs.org/)
 [![MIT](https://img.shields.io/badge/License-MIT-555555?style=flat-square)](<LICENSE>)
 
@@ -14,7 +14,9 @@
 - **模型与推理程度可选**：继承 Host 当前模型，或显式指定 `model`、`reasoningEffort`。
 - **任务可追踪**：提交后立即返回 Session ID，支持状态、增量事件、等待与取消。
 
-> 仅支持官方 Desktop **`0.2.0-rc.1` / commit `4878cda`**。桥接不启动 Desktop、不直接调用模型服务，也不直接读写持久化 Session 文件。
+> 仅支持官方 Desktop **`0.2.0-rc.2`**。桥接不启动 Desktop、不直接调用模型服务，也不直接读写持久化 Session 文件。
+>
+> 从 `0.1.0` 升级时，Desktop 插件与 MCP 服务须一起更新到 `0.2.0`；每次委托都要传绝对 `cwd`。详见[发布说明](<CHANGELOG.md>)。
 
 ## 快速开始
 
@@ -55,7 +57,7 @@ default_tools_approval_mode = "approve"
 DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 ```
 
-`DSH_HOME` 必须与 Desktop 一致；使用默认位置时可以省略。上面的 `"approve"` 用于免逐次确认的委托，非交互 `codex exec` 也需要它；交互模式下可移除此项以逐次确认。
+`DSH_HOME` 必须与 Desktop 一致；使用默认位置时可以省略。在已人工验证的 Codex CLI `0.155.1` 中，非交互 `codex exec` 需要上面的 `"approve"` 才能调用这些工具；其他版本请核对其 MCP 审批规则。交互模式下可移除此项以逐次确认。
 
 ## 委托一个任务
 
@@ -65,12 +67,12 @@ DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 {
   "task": "运行当前项目的测试并总结结果",
   "cwd": "/absolute/path/to/current-project",
-  "model": "opencodex/dsh-zhipuai/glm-5.3",
+  "model": "your-provider/glm-5.3",
   "reasoningEffort": "max"
 }
 ```
 
-模型路径和推理程度须匹配 Host 目录；可省略 `model` 以继承当前模型，`reasoningEffort` 也可以单独传。默认目录环境变量不再替代 `cwd`。
+`your-provider` 为占位符，请替换为 Desktop 中实际配置的 provider ID。模型路径和推理程度须匹配 Host 目录；可省略 `model` 以继承当前模型，`reasoningEffort` 也可以单独传。默认目录环境变量不再替代 `cwd`。
 
 拿到 `sessionId` 后，用 `dsh_wait` 等待结果，或在 Desktop 中打开该会话。
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BRIDGE_VERSION,
   connectionFileSchema,
   delegateRequestSchema,
   followRequestSchema,
@@ -19,8 +20,9 @@ describe('protocol validation', () => {
   })
 
   it('only accepts loopback discovery endpoints', () => {
-    const common = { token: 'x'.repeat(32), pid: 1, version: '0.1.0', instanceId: crypto.randomUUID() }
+    const common = { token: 'x'.repeat(32), pid: 1, version: BRIDGE_VERSION, instanceId: crypto.randomUUID() }
     expect(connectionFileSchema.parse({ ...common, endpoint: 'http://127.0.0.1:43127' }).endpoint).toContain('127.0.0.1')
+    expect(connectionFileSchema.safeParse({ ...common, version: '0.1.0', endpoint: 'http://127.0.0.1:43127' }).success).toBe(false)
     expect(() => connectionFileSchema.parse({ ...common, endpoint: 'http://localhost:43127' })).toThrow(/127\.0\.0\.1/)
   })
 })

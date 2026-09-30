@@ -1,6 +1,6 @@
 # Repository Rules
 
-This repository builds a loopback bridge for official `deepseek-ai/deepseek-harness` Desktop 0.2.0-rc.1 at commit `4878cda`, plus a stdio MCP server. No other Host runtime is supported.
+This repository builds a loopback bridge for official `deepseek-ai/deepseek-harness` Desktop 0.2.0-rc.2, plus a stdio MCP server. Bridge 0.2.0 targets this Host; the earlier 0.1.0 release targeted 0.2.0-rc.1. No other Host runtime is supported.
 
 ## Runtime constraints
 

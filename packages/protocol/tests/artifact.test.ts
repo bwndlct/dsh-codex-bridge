@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { gunzipSync } from 'node:zlib'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import YAML from 'yaml'
+import { BRIDGE_VERSION } from '../src/index.js'
 
 const run = promisify(execFile)
 const root = resolve(import.meta.dirname, '../../..')
@@ -52,6 +53,7 @@ describe('packed artifacts', () => {
   it('packs a valid official Desktop bundle with self-contained protocol runtime', async () => {
     const files = await pack(join(root, 'packages/dsh-plugin'))
     const manifest = JSON.parse(files.get('package/package.json')!.toString('utf8')) as Record<string, any>
+    expect(manifest.version).toBe(BRIDGE_VERSION)
     expect(manifest.main).toBe('./lib/index.js')
     expect(manifest.exports['./package.json']).toBe('./package.json')
     expect(manifest.dependencies?.['@dsh-codex-bridge/protocol']).toBeUndefined()
@@ -73,6 +75,7 @@ describe('packed artifacts', () => {
   it('packs an importable MCP binary without a private protocol dependency', async () => {
     const files = await pack(join(root, 'packages/mcp-server'))
     const manifest = JSON.parse(files.get('package/package.json')!.toString('utf8')) as Record<string, any>
+    expect(manifest.version).toBe(BRIDGE_VERSION)
     expect(manifest.main).toBe('./lib/index.js')
     expect(manifest.bin['dsh-codex-bridge-mcp']).toBe('./lib/bin.js')
     expect(manifest.exports['./package.json']).toBe('./package.json')

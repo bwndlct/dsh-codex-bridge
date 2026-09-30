@@ -1,7 +1,7 @@
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { BridgeError } from '@dsh-codex-bridge/protocol'
+import { BRIDGE_VERSION, BridgeError } from '@dsh-codex-bridge/protocol'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { describe, expect, it, vi } from 'vitest'
@@ -32,6 +32,7 @@ describe('MCP framing', () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
     try {
+      expect(client.getServerVersion()).toEqual({ name: 'dsh-codex-bridge', version: BRIDGE_VERSION })
       const tools = await client.listTools()
       expect(tools.tools.map(tool => tool.name)).toEqual([
         'dsh_delegate', 'dsh_status', 'dsh_wait', 'dsh_follow', 'dsh_cancel',
