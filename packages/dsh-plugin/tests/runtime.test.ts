@@ -1,6 +1,6 @@
 import { mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FollowFrame, BridgeContext, SessionControllerLike } from '../src/types.js'
 import { BridgeRuntime } from '../src/runtime.js'
@@ -28,7 +28,7 @@ class FrameStream {
   }
 }
 
-function harness(workspaceId?: string, failPrompt = false) {
+function harness(workspaces: { id: string; path: string; title: string }[] = [], failPrompt = false) {
   const stream = new FrameStream()
   let running = false
   const calls: { create: unknown[]; workspaceCreate: string[]; prompt: unknown[]; select: unknown[]; cancel: unknown[]; order: string[] } = {
@@ -50,18 +50,14 @@ function harness(workspaceId?: string, failPrompt = false) {
     follow(_request, signal) { return stream.iterate(signal) },
     cancel(request) { calls.cancel.push(request); return { accepted: true } },
   }
-  const workspaces = new Map<string, { id: string; path: string }>()
   const registry = {
-    async resolveByPath(path: string) {
-      calls.order.push('resolveWorkspace')
-      return workspaceId === undefined ? workspaces.get(path) : { id: workspaceId, path }
+    list() {
+      calls.order.push('listWorkspaces')
+      return workspaces
     },
     async create(path: string) {
-      calls.order.push('createWorkspace')
       calls.workspaceCreate.push(path)
-      const workspace = { id: 'workspace-new', path }
-      workspaces.set(path, workspace)
-      return workspace
+      throw new Error('Workspace creation is forbidden')
     },
   }
   const context = { sessionController: controller, workspaceRegistry: registry } as BridgeContext
@@ -74,13 +70,13 @@ afterEach(() => { for (const runtime of runtimes.splice(0)) runtime.dispose() })
 describe('BridgeRuntime delegation', () => {
   it('resolves a registered workspace, inherits the Host model, and admits the exact prompt', async () => {
     const cwd = await realpath(await mkdtemp(join(tmpdir(), 'bridge-runtime-')))
-    const h = harness('workspace-1')
+    const h = harness([{ id: 'workspace-1', path: cwd, title: basename(cwd) }])
     runtimes.push(h.runtime)
     const result = await h.runtime.delegate({ task: '  do work  ', cwd }, AbortSignal.timeout(1_000))
     expect(result.sessionId).toBe('session-1')
     expect(h.calls.create).toEqual([{ workspaceId: 'workspace-1' }])
     expect(h.calls.select).toEqual([])
-    expect(h.calls.order).toEqual(['resolveWorkspace', 'create', 'prompt'])
+    expect(h.calls.order).toEqual(['listWorkspaces', 'create', 'prompt'])
     expect(result).toMatchObject({
       cwd,
       workspace: { matched: true, id: 'workspace-1' },
@@ -91,16 +87,17 @@ describe('BridgeRuntime delegation', () => {
     expect((h.calls.prompt[0] as { requestId: string }).requestId).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('registers canonical cwd as a workspace and validates exact provider/model', async () => {
+  it('uses the default ungrouped section at canonical cwd without registering a Workspace', async () => {
     const cwd = await realpath(await mkdtemp(join(tmpdir(), 'bridge-runtime-')))
     const h = harness()
     runtimes.push(h.runtime)
     const result = await h.runtime.delegate({ task: 'work', cwd, model: 'provider/model/v2' }, AbortSignal.timeout(1_000))
-    expect(h.calls.workspaceCreate).toEqual([cwd])
-    expect(h.calls.create).toEqual([{ workspaceId: 'workspace-new' }])
-    expect(result.workspace).toEqual({ matched: false, id: 'workspace-new' })
+    expect(h.calls.workspaceCreate).toEqual([])
+    expect(h.calls.create).toEqual([{ cwd }])
+    expect(result).toMatchObject({ cwd, workspace: { matched: false } })
+    expect(result.workspace.id).toBeUndefined()
     expect(h.calls.select).toEqual([{ sessionId: 'session-1', provider: 'provider', model: 'model/v2' }])
-    expect(h.calls.order).toEqual(['modelCatalog', 'resolveWorkspace', 'createWorkspace', 'create', 'selectModel', 'prompt'])
+    expect(h.calls.order).toEqual(['modelCatalog', 'listWorkspaces', 'create', 'selectModel', 'prompt'])
   })
 
   it('selects max before prompting and rejects unavailable efforts before creating a Session', async () => {
@@ -116,16 +113,16 @@ describe('BridgeRuntime delegation', () => {
 
   it('applies reasoning effort to the Host default without an explicit model', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'bridge-runtime-'))
-    const h = harness('workspace-1')
+    const h = harness([{ id: 'workspace-1', path: cwd, title: basename(cwd) }])
     runtimes.push(h.runtime)
     const result = await h.runtime.delegate({ task: 'work', cwd, reasoningEffort: 'max' }, AbortSignal.timeout(1_000))
     expect(h.calls.select).toEqual([{ sessionId: 'session-1', provider: 'provider', model: 'model/v2', reasoningEffort: 'max' }])
     expect(result.model).toEqual({ provider: 'provider', model: 'model/v2', reasoningEffort: 'max', source: 'default' })
-    expect(h.calls.order).toEqual(['modelCatalog', 'resolveWorkspace', 'create', 'selectModel', 'prompt'])
+    expect(h.calls.order).toEqual(['modelCatalog', 'listWorkspaces', 'create', 'selectModel', 'prompt'])
     expect(h.calls.workspaceCreate).toEqual([])
   })
 
-  it('rejects an unavailable inherited effort before registering a workspace or creating a Session', async () => {
+  it('rejects an unavailable inherited effort before creating a Session', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'bridge-runtime-'))
     const h = harness()
     runtimes.push(h.runtime)
@@ -150,23 +147,42 @@ describe('BridgeRuntime delegation', () => {
     const cwd = await realpath(await mkdtemp(join(tmpdir(), 'bridge-runtime-')))
     const alias = join(await mkdtemp(join(tmpdir(), 'bridge-alias-')), 'project')
     await symlink(cwd, alias, 'dir')
-    const h = harness()
+    const h = harness([{ id: 'workspace-1', path: cwd, title: basename(cwd) }])
     runtimes.push(h.runtime)
     await h.runtime.delegate({ task: 'work', cwd }, AbortSignal.timeout(1_000))
     const result = await h.runtime.delegate({ task: 'work', cwd: alias }, AbortSignal.timeout(1_000))
-    expect(h.calls.workspaceCreate).toEqual([cwd])
-    expect(h.calls.create).toEqual([{ workspaceId: 'workspace-new' }, { workspaceId: 'workspace-new' }])
-    expect(result).toMatchObject({ cwd, workspace: { matched: true, id: 'workspace-new' } })
+    expect(h.calls.workspaceCreate).toEqual([])
+    expect(h.calls.create).toEqual([{ workspaceId: 'workspace-1' }, { workspaceId: 'workspace-1' }])
+    expect(result).toMatchObject({ cwd, workspace: { matched: true, id: 'workspace-1' } })
   })
 
-  it('does not create an ungrouped Session when Workspace registration fails', async () => {
+  it('matches the Workspace title and reports its execution directory', async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), 'bridge-runtime-')))
+    const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'bridge-workspace-')))
+    const h = harness([{ id: 'workspace-1', path: workspacePath, title: basename(cwd) }])
+    runtimes.push(h.runtime)
+    const result = await h.runtime.delegate({ task: 'work', cwd }, AbortSignal.timeout(1_000))
+    expect(h.calls.create).toEqual([{ workspaceId: 'workspace-1' }])
+    expect(result).toMatchObject({ cwd: workspacePath, workspace: { matched: true, id: 'workspace-1' } })
+    expect(h.calls.workspaceCreate).toEqual([])
+  })
+
+  it('does not group by path when the Workspace has a different title', async () => {
+    const cwd = await realpath(await mkdtemp(join(tmpdir(), 'bridge-runtime-')))
+    const h = harness([{ id: 'workspace-1', path: cwd, title: 'renamed-workspace' }])
+    runtimes.push(h.runtime)
+    const result = await h.runtime.delegate({ task: 'work', cwd }, AbortSignal.timeout(1_000))
+    expect(h.calls.create).toEqual([{ cwd }])
+    expect(result.workspace).toEqual({ matched: false })
+    expect(h.calls.workspaceCreate).toEqual([])
+  })
+
+  it('does not hide Workspace lookup failures by creating an ungrouped Session', async () => {
     const cwd = await realpath(await mkdtemp(join(tmpdir(), 'bridge-runtime-')))
     const h = harness()
     runtimes.push(h.runtime)
-    vi.spyOn(h.registry, 'create').mockRejectedValue(new Error('storage refused'))
-    await expect(h.runtime.delegate({ task: 'work', cwd }, AbortSignal.timeout(1_000))).rejects.toMatchObject({
-      code: 'WORKSPACE_REGISTRATION_FAILED', details: { cwd, cause: 'storage refused' },
-    })
+    vi.spyOn(h.registry, 'list').mockImplementation(() => { throw new Error('storage refused') })
+    await expect(h.runtime.delegate({ task: 'work', cwd }, AbortSignal.timeout(1_000))).rejects.toThrow('storage refused')
     expect(h.calls.create).toEqual([])
     expect(h.calls.prompt).toEqual([])
   })
@@ -185,7 +201,7 @@ describe('BridgeRuntime delegation', () => {
 
   it('returns the created session id when post-create admission fails', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'bridge-runtime-'))
-    const h = harness(undefined, true)
+    const h = harness([], true)
     runtimes.push(h.runtime)
     await expect(h.runtime.delegate({ task: 'work', cwd }, AbortSignal.timeout(1_000))).rejects.toMatchObject({
       code: 'SESSION_ADMISSION_FAILED',

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-codex-bridge/protocol",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Validated loopback protocol shared by the DSH Codex bridge plugin and MCP server",
   "type": "module",
   "license": "MIT",

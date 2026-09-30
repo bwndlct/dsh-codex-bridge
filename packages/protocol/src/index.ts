@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const BRIDGE_VERSION = '0.2.0'
+export const BRIDGE_VERSION = '0.2.1'
 export const DEFAULT_BRIDGE_PORT = 43127
 export const DEFAULT_EVENT_LIMIT = 512
 export const MAX_EVENT_LIMIT = 4096

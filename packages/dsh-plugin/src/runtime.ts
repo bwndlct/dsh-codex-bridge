@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
+import { basename, isAbsolute, resolve } from 'node:path'
 import {
   BridgeError,
   type CancelResponse,
@@ -46,18 +46,10 @@ export class BridgeRuntime {
       }
     }
     this.tracker.ensureCapacity()
-    const matched = await this.ctx.workspaceRegistry.resolveByPath(cwd)
-    let workspace = matched
-    if (workspace === undefined) {
-      try {
-        workspace = await this.ctx.workspaceRegistry.create(cwd)
-      } catch (error) {
-        throw new BridgeError('WORKSPACE_REGISTRATION_FAILED', 'The task directory could not be registered as a DSH Workspace.', 502, {
-          cwd, cause: error instanceof Error ? error.message : String(error),
-        })
-      }
-    }
-    const created = await this.ctx.sessionController.create({ workspaceId: workspace.id })
+    const workspace = this.ctx.workspaceRegistry.list().find(candidate => candidate.title === basename(cwd))
+    const created = await this.ctx.sessionController.create(workspace === undefined
+      ? { cwd }
+      : { workspaceId: workspace.id })
     this.tracker.start(created.sessionId)
     try {
       if (selection !== undefined) {
@@ -84,10 +76,10 @@ export class BridgeRuntime {
     return {
       sessionId: created.sessionId,
       status: 'queued',
-      cwd,
+      cwd: workspace?.path ?? cwd,
       workspace: {
-        matched: matched !== undefined,
-        id: workspace.id,
+        matched: workspace !== undefined,
+        ...(workspace === undefined ? {} : { id: workspace.id }),
       },
       ...(selection === undefined ? {} : { model: selection }),
       guidance: 'Prompt admitted. Use dsh_wait for bounded waiting, dsh_status for current Host state, or dsh_follow for incremental events.',

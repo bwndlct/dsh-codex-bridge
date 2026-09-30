@@ -8,15 +8,15 @@
 
 让 **Codex 把任务交给本机 DeepSeek Harness Desktop**：复用 Host 已配置的模型和运行时，在 Desktop 中查看、继续或取消会话。
 
-![Codex 通过 MCP 和本机鉴权 HTTP 将任务交给 Desktop；执行目录与 Workspace 分组一致](<docs/assets/bridge.zh-CN.png>)
+![Codex 通过 MCP 和本机鉴权 HTTP 将任务交给 Desktop；按已有工作区名称归组，无匹配时进入未分组分区](<docs/assets/bridge.zh-CN.png>)
 
-- **目录与分组一致**：传入 Codex 当前任务目录，复用或注册对应的 DSH Workspace。
+- **自动归组，不新建工作区**：按 Codex 目录名复用已有同名 DSH Workspace；没有同名项则进入默认的未分组分区，保留原目录。
 - **模型与推理程度可选**：继承 Host 当前模型，或显式指定 `model`、`reasoningEffort`。
 - **任务可追踪**：提交后立即返回 Session ID，支持状态、增量事件、等待与取消。
 
 > 仅支持官方 Desktop **`0.2.0-rc.2`**。桥接不启动 Desktop、不直接调用模型服务，也不直接读写持久化 Session 文件。
 >
-> 从 `0.1.0` 升级时，Desktop 插件与 MCP 服务须一起更新到 `0.2.0`；每次委托都要传绝对 `cwd`。详见[发布说明](<CHANGELOG.md>)。
+> 升级到 `0.2.1` 时，Desktop 插件与 MCP 服务须一起更新；每次委托都要传绝对 `cwd`。详见[发布说明](<CHANGELOG.md>)。
 
 ## 快速开始
 
@@ -72,7 +72,7 @@ DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 }
 ```
 
-`your-provider` 为占位符，请替换为 Desktop 中实际配置的 provider ID。模型路径和推理程度须匹配 Host 目录；可省略 `model` 以继承当前模型，`reasoningEffort` 也可以单独传。默认目录环境变量不再替代 `cwd`。
+`your-provider` 为占位符，请替换为 Desktop 中实际配置的 provider ID。模型路径和推理程度须匹配 Host 目录；可省略 `model` 以继承当前模型，`reasoningEffort` 也可以单独传。默认目录环境变量不再替代 `cwd`。同名工作区按 DSH 展示顺序选取；成功响应的 `cwd` 是 Session 的执行目录。未匹配时 `workspace.matched` 为 `false`，不返回 `workspace.id`。
 
 拿到 `sessionId` 后，用 `dsh_wait` 等待结果，或在 Desktop 中打开该会话。
 
@@ -89,7 +89,7 @@ DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 - **接纳不等于完成**：以状态和事件确认结果；创建后失败会返回 `sessionId`，不要盲目重试。
 - **选择模型有副作用**：Host 的 `selectModel` 会在后台保存默认选择，包括推理程度。
 - **仅本机连接**：HTTP 只监听 `127.0.0.1`，需要 Bearer 鉴权；发现文件按 `0600` 写入。
-- **游标不是持久化历史**：插件重载后旧游标失效；Workspace 注册失败不会退回“未分组”。
+- **游标不是持久化历史**：插件重载后旧游标失效。归组只复用已有工作区，不创建或删除工作区。
 
 [配置、协议与排错](<docs/reference.md>) · [Host 插件](<packages/dsh-plugin/README.md>) · [MCP 服务](<packages/mcp-server/README.md>) · [反馈问题](https://github.com/bwndlct/dsh-codex-bridge/issues)
 

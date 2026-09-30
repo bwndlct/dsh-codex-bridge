@@ -61,8 +61,7 @@ export interface SessionControllerLike {
 }
 
 export interface WorkspaceRegistryLike {
-  resolveByPath(path: string): Promise<{ readonly id: string; readonly path?: string } | undefined>
-  create(path: string): Promise<{ readonly id: string; readonly path: string }>
+  list(): readonly { readonly id: string; readonly path: string; readonly title: string }[]
 }
 
 export interface BridgeContext extends Context {

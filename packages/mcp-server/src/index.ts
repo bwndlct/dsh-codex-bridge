@@ -43,7 +43,7 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   const server = new McpServer({ name: 'dsh-codex-bridge', version: BRIDGE_VERSION })
 
   server.registerTool('dsh_delegate', {
-    description: 'Delegate a task to a new session in the running DSH Desktop Host. Always pass the current Codex task working directory as cwd; its DSH Workspace is reused or registered. Returns immediately after prompt admission.',
+    description: 'Delegate a task to a new session in the running DSH Desktop Host. Pass the current Codex task directory as cwd. Reuse an existing DSH Workspace whose title matches the directory name; otherwise create an ungrouped Session at cwd in the default section. Never register a Workspace. The response cwd is the Session execution directory. Returns immediately after prompt admission.',
     inputSchema: z.object({
       task: z.string().min(1).describe('Nonempty task for the DSH Host model.'),
       cwd: z.string().min(1).refine(isAbsolute, 'cwd must be absolute').describe('Required absolute working directory of the current Codex task, not the MCP process directory.'),

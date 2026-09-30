@@ -6,7 +6,7 @@
 
 ## 安装与发现 / Installation and Discovery
 
-桥接 `0.2.0` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
+桥接 `0.2.1` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
 
 - 第一次安装：通过 HMR 应用，确认 `application: "applied"`，不把重启作为首次安装步骤。
 - 替换已安装包、加载已安装源码的新模块：可能返回 `restart-required`，重启由操作者决定。
@@ -27,11 +27,11 @@ Codex CLI `0.155.1` 的历史人工验证覆盖了 `dsh_delegate` 与 `dsh_wait`
 | `model` | 可选，精确的 `provider/model`，不做猜测或静默替换 |
 | `reasoningEffort` | 可选，模型目录中支持的精确 effort ID；可以不传 `model` |
 
-Host 先通过 `realpath` 规范化目录。传入模型或推理程度时，先校验模型目录，再复用或注册 Workspace，最后按 `workspaceId` 创建 Session。目录、Workspace 分组与 Session 的执行位置保持一致，不创建未分组的兜底会话。
+Host 先通过 `realpath` 规范化目录。传入模型或推理程度时，先校验模型目录，再按规范化目录的最后一段名称匹配已有 Workspace 的 `title`（区分大小写，按 DSH 展示顺序取首项）。匹配时按 `workspaceId` 创建 Session，执行目录由该工作区提供；没有同名项时按原 `cwd` 创建 Session，进入默认的未分组分区。整个委派过程不注册新工作区。
 
 两项模型参数都省略时，不调用模型目录或 `selectModel`，直接继承 Host 当前选择。只传推理程度时，使用模型目录中的默认模型；默认模型缺失、不可用或 effort 不支持时明确失败。显式选择调用官方 `selectModel`，它还会后台保存 Host 默认选择。
 
-成功响应包含 `sessionId`、规范化 `cwd`、`workspace.id` 和接纳状态；请求过模型或 effort 时还返回 `model`。`workspace.matched` 只表示查询时是否已有注册；`false` 加上有效 `id` 可以表示新注册的 Workspace，并非失败。`model.source` 是 `default` 或 `override`。
+成功响应包含 `sessionId`、执行目录 `cwd`、`workspace.matched` 和接纳状态；请求过模型或 effort 时还返回 `model`。`workspace.matched: true` 表示命中已有同名工作区，并返回其 `id`；`false` 表示默认的未分组分区，不返回 `id`，属于正常成功。`model.source` 是 `default` 或 `override`。
 
 `prompt` 使用队列模式提交一条文本。返回成功只表示接纳，不代表模型完成或任务结果正确。
 
@@ -55,7 +55,6 @@ Host 先通过 `realpath` 规范化目录。传入模型或推理程度时，先
 | `INVALID_CWD` | 路径非绝对、不存在或不是目录；修正为确认过的当前任务目录 |
 | `MODEL_NOT_FOUND` / `DEFAULT_MODEL_UNAVAILABLE` | 模型路由不匹配或无可用默认模型；检查 Host 目录，不切换到猜测模型 |
 | `INVALID_REASONING_EFFORT` | 当前模型不支持该程度；读取错误中的可用值后明确选择 |
-| `WORKSPACE_REGISTRATION_FAILED` | 注册分组失败，未继续创建 Session；检查返回原因，不退回其他目录 |
 | `SESSION_ADMISSION_FAILED` | Session 已创建，但选择模型或提交 prompt 失败；保留 `details.sessionId` 并检查状态，不自动重复派发 |
 | `CURSOR_EXPIRED` | 插件实例已更换；不传旧游标，重新读取事件 |
 | `TRACKER_CAPACITY` | 当前跟踪容量内的 Session 都活跃；等待任务结束后再委托 |
@@ -86,7 +85,7 @@ pnpm pack:mcp
 | 超时与取消 | 零时限等待返回超时且任务继续运行；取消被 Host 接纳，原始状态转为非运行，会话与事件仍可查询 |
 | 失败边界 | 无鉴权健康检查被拒绝；不存在的目录、不可用模型和不支持的 effort 分别返回明确错误 |
 
-该记录覆盖本次发布的 Workspace 与 effort 行为；第三方插件的功能以及其他 Desktop / Codex CLI 版本不在此验收范围内。
+以上为 `0.2.0` 的历史实机验收，Workspace 注册行为已经在 `0.2.1` 移除。`0.2.1` 的同名复用、无匹配未分组、不注册 Workspace 行为由自动测试覆盖；安装后的 Desktop 实机检查仍需操作者执行。第三方插件功能及其他 Desktop / Codex CLI 版本不在此范围内。
 
 ## 源码导航 / Source Map
 

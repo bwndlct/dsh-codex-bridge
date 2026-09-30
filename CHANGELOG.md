@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 - 2026-09-30
+
+- Match the canonical Codex directory name to an existing DSH Workspace title, in display order.
+- With no matching title, create an ungrouped Session at the supplied directory in the default section; never register a Workspace.
+- The response `cwd` reports the Session execution directory. Unmatched responses set `workspace.matched: false` and omit `workspace.id`.
+- Update the Desktop plugin and MCP server together; discovery now requires `0.2.1`. Host support remains official Desktop `0.2.0-rc.2`.
+
 ## 0.2.0 - 2026-09-30
 
 ### Breaking Changes

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-codex-bridge/dsh-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Loopback Codex delegation bridge for official DeepSeek Harness Desktop 0.2.0-rc.2",
   "type": "module",
   "license": "MIT",

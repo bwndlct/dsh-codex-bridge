@@ -8,15 +8,15 @@
 
 **Delegate Codex tasks to your local DeepSeek Harness Desktop.** Reuse the Host's configured model and runtime, then inspect, continue, or cancel the Session in Desktop.
 
-![Codex delegates through stdio MCP and authenticated loopback HTTP; the execution directory matches the Desktop Workspace](<docs/assets/bridge.en.png>)
+![Codex delegates through stdio MCP and authenticated loopback HTTP; reuse an existing named Workspace or use the ungrouped section](<docs/assets/bridge.en.png>)
 
-- **Matching directory and group:** pass the current Codex task directory to reuse or register its DSH Workspace.
+- **Automatic grouping without new Workspaces:** reuse an existing DSH Workspace whose title matches the Codex directory name; otherwise use the default ungrouped section at the original directory.
 - **Optional model and effort:** inherit the Host model, or specify `model` and `reasoningEffort`.
 - **Trackable tasks:** get a Session ID after admission, with status, incremental events, bounded waiting, and cancellation.
 
 > Supports only official Desktop **`0.2.0-rc.2`**. The bridge never starts Desktop, calls a model provider directly, or reads or edits persisted Session files directly.
 >
-> Upgrading from `0.1.0`? Update both the Desktop plugin and MCP server to `0.2.0`, and pass absolute `cwd` on every delegation. See the [release notes](<CHANGELOG.md>).
+> Upgrading to `0.2.1`? Update both the Desktop plugin and MCP server, and pass absolute `cwd` on every delegation. See the [release notes](<CHANGELOG.md>).
 
 ## Quick Start
 
@@ -72,7 +72,7 @@ Call `dsh_delegate`, **always passing the current Codex task's absolute `cwd`**:
 }
 ```
 
-Replace the `your-provider` placeholder with the provider ID configured in Desktop. The model route and effort must match the Host catalog. Omit `model` to inherit the current model; `reasoningEffort` also works on its own. A default-directory environment setting no longer substitutes for `cwd`.
+Replace the `your-provider` placeholder with the provider ID configured in Desktop. The model route and effort must match the Host catalog. Omit `model` to inherit the current model; `reasoningEffort` also works on its own. A default-directory environment setting no longer substitutes for `cwd`. Matching titles use DSH display order. The response `cwd` is the Session execution directory. With no match, `workspace.matched` is `false` and `workspace.id` is omitted.
 
 Use the returned `sessionId` with `dsh_wait`, or open the Session in Desktop.
 
@@ -89,7 +89,7 @@ Use the returned `sessionId` with `dsh_wait`, or open the Session in Desktop.
 - **Admission is not completion:** verify status and events. Post-creation admission errors include `sessionId`; do not retry blindly.
 - **Model selection has a side effect:** the Host's `selectModel` saves its default selection, including reasoning effort, in the background.
 - **Local connections only:** HTTP binds to `127.0.0.1`, requires Bearer authentication, and writes discovery with mode `0600`.
-- **Cursors are not durable history:** plugin reloads invalidate old cursors. Workspace registration failures do not fall back to an ungrouped Session.
+- **Cursors are not durable history:** plugin reloads invalidate old cursors. Delegation only reuses existing Workspaces; it never creates or deletes them.
 
 [Configuration, protocol, and troubleshooting (Chinese)](<docs/reference.md>) · [Host plugin](<packages/dsh-plugin/README.md>) · [MCP server](<packages/mcp-server/README.md>) · [Report an issue](https://github.com/bwndlct/dsh-codex-bridge/issues)
 
