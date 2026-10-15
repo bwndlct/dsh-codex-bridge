@@ -6,7 +6,7 @@
 
 ## 安装与发现 / Installation and Discovery
 
-桥接 `0.2.2` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
+桥接 `0.2.3` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
 
 - 第一次安装：通过 HMR 应用，确认 `application: "applied"`，不把重启作为首次安装步骤。
 - 替换已安装包、加载已安装源码的新模块：可能返回 `restart-required`，重启由操作者决定。
@@ -41,16 +41,46 @@ Bridge 先通过 `realpath` 规范化目录。传入模型或推理程度时，�
 
 - 原始 `running` 优先于旧的 `turn/end`；新的 `turn/start` 清除上一轮终态，之后的 `turn/end` 结束新轮次。
 - 持久化 `turn/end.reason` 的 `error`、`aborted` 分别恢复为错误、取消状态；接管历史 Session 不依赖已丢失的实时错误通知。
-- `dsh_follow` 默认返回 100 条事件，最大 500 条，并受每页 16 KiB 事件预算约束；消费后保存 `nextCursor`。`truncated` 只表示保留历史已出现缺口，不表示本页因数量或字节预算尚有后续事件。
-- `dsh_wait` 默认 30 秒，最大 120 秒；超时不取消 Session，断开 HTTP 等待也不取消任务。
-- 事件有界、保存在插件进程内；默认每个 Session 保留 512 条，最多配置 4096 条。
-- 跟踪不订阅 assistant token stream，并过滤 system/user 消息和请求上下文；保留任务结果与生命周期事件，`request/header` 只保留模型配置证据。约 4 KiB 以上单条事件返回预览并标记 `bridgeContentTruncated`，不能把预览当作完整结果。
+- `dsh_follow` 默认返回 100 条事件，最大 500 条，并受每页 `events` 数组 16 KiB 的序列化预算约束。`dsh_follow` 和 `dsh_wait` 响应都必含 `hasMore`；消费本页后保存 `nextCursor`，`hasMore: true` 时用它继续调用 `dsh_follow`，直到当前积压读完。
+- `status.terminal` 只表示执行已结束，与本页之后是否还有事件独立；终态响应仍可能 `hasMore: true`。`status.lastCursor` 是跟踪器已知的最新位置，不能替代已消费页面的 `nextCursor`，否则会跳过未读内容。`truncated` 只表示保留历史已出现缺口，不能用来判断是否还有下一页。
+- `dsh_wait` 默认 30 秒，最大 120 秒；超时不取消 Session，断开 HTTP 等待也不取消任务。`hasMore: false` 只表示本次快照没有后续保留事件；任务还在运行时，继续使用已消费的 `nextCursor` 等待或跟踪后续事件。
+- 事件有界、保存在插件进程内；默认每个 Session 保留 512 条，最多配置 4096 条。每个分片占一条，较大的消息或较慢的读取都可能使早期分片过期；环形历史缺口和缺失片号都须保留为不完整证据。
+- 跟踪不订阅 assistant token stream，并过滤 system/user 消息和请求上下文；`request/header` 只保留模型配置证据。assistant 消息按下述投影传输；序列化后完整事件不超过 4 KiB 时保留投影后的原 `data`，超限时改用可恢复分片，不返回缩短预览。
 - 游标绑定实例、Session 和序号；插件重载后可重新接管已有 Session，但旧游标不能继续使用。
 - 默认最多跟踪 100 个 Session，创建前预留容量以覆盖并发委托；只淘汰非活跃的 LRU 条目。接管空 Session 不占活跃名额，仍在运行的取消请求不能被淘汰。
 - 取消分别报告桥接接纳和 Host 原始 `{ accepted: true }`；该回执只证明已请求取消，停止以 Host 状态或结束事件为准。保留会话与历史，不回滚文件修改。
 - 插件释放时结束等待并拒绝重建跟踪；重新加载后用新实例和新游标查询。
 
-MCP `dsh_wait` / `dsh_follow` 只通过 `content[0].text` 返回完整的有界 JSON 结果，不再重复写入 `structuredContent`。读取这两个工具 `structuredContent` 的调用方须迁移；其他工具和错误仍保留文本与结构化两通道，HTTP 协议数据不变。
+MCP `dsh_wait` / `dsh_follow` 只通过 `content[0].text` 返回有界 JSON 页面，不重复写入 `structuredContent`。读取这两个工具 `structuredContent` 的调用方须迁移；其他工具和错误仍保留文本与结构化两通道。HTTP 与 MCP 使用相同的分页、`hasMore` 和分片数据契约。
+
+## 完整事件读取 / Complete Event Consumption
+
+`assistant/message` 的 `data` 只保留 `turn`、`step` 和 `message`。`message` 保留 `id`、`role`、`content`，以及可选的 `source`；`content` 保留全部块及内容，包括 reasoning 块。`data.message.source` 只保留字符串字段 `kind`、`provider`、`model`。`data.stream`、`data.message.source.replayState` 等内部元数据不传输，避免内部回放数据挤占答复内容。该投影只用于 `assistant/message`；`turn/start`、`turn/end`、`assistant/error`、`error` 的 `data` 保留原值，超长时使用同一分片规则。
+
+预算按序列化 JSON 的 UTF-8 字节计算，包含事件外层的 cursor、kind、time 等字段及字符串转义开销。完整事件不超过 4 KiB 时，`data` 保持上述投影后的原值；超限时将该 `data` 序列化为 JSON，再把连续文本拆到多个事件的 `data` 中。每个分片事件仍不超过 4 KiB，每页序列化后的 `events` 数组仍不超过 16 KiB；这些预算不表示整个响应对象只有 16 KiB。
+
+分片的 `data` 使用扁平结构，例如：
+
+```json
+{
+  "bridgeContentChunk": true,
+  "id": "first-chunk-cursor",
+  "index": 0,
+  "total": 3,
+  "encoding": "json",
+  "text": "{\"turn\":"
+}
+```
+
+`id` 等于这组首片的事件 `cursor`，所有片共享此值；每片仍有自己的事件 `cursor`。`index` 从 `0` 开始，`total` 为该组片总数，`text` 是原 JSON 文本的连续片段，单片不必是合法 JSON。调用方按下面顺序读取：
+
+1. 解析 MCP `content[0].text` 的页面 JSON（HTTP 调用方直接读取响应 JSON），按事件 `cursor` 去重。不要按共享的 `id` 或 `durableSeq` 丢弃同组后续分片。
+2. 普通事件直接消费 `data`；分片按 `data.id` 跨页面收集，并保留每片的 `index`、`total`、`encoding` 与 `text`。
+3. 同组全部 `index = 0..total-1` 齐全且片头一致后，按 index 排序，将 `text` 用 `join('')` 拼接，再执行一次 `JSON.parse`，恢复原事件 `data`。仅收到最后一片、收到若干完整文本块或看到 `turn/end` 都不能代替此检查。
+4. 消费本页后保存其 `nextCursor`。`hasMore: true` 时继续 `dsh_follow`，沿页面游标排空当前积压；不要改用 `status.lastCursor`，也不要因 `status.terminal: true` 停止翻页。`hasMore: false` 后若仍在运行，后续可从同一消费游标继续等待或跟踪。
+5. 保留历史的 `truncated` 缺口和未齐分片组必须报告为结果不完整；缺片时不解析局部 JSON、不把片尾冒充完整答复，也不自动重新委托任务。即使 `hasMore: false` 或执行已经结束，缺失内容也不会因此恢复。
+
+MCP 仍只有 `dsh_delegate`、`dsh_status`、`dsh_follow`、`dsh_wait`、`dsh_cancel` 五个工具；固定 HTTP 业务路由仍为 `/v1/delegate`、`/v1/status`、`/v1/follow`、`/v1/wait`、`/v1/cancel`。本次修复不新增工具或路由，不改变原请求参数、timeout 或自动重发规则。插件与 MCP 服务必须一起升级到 `0.2.3`，混合版本会被发现协议拒绝。
 
 ## 常见错误 / Troubleshooting
 
@@ -95,7 +125,7 @@ pnpm pack:mcp
 | 超时与取消 | 零时限等待返回超时且任务继续运行；取消被 Host 接纳，原始状态转为非运行，会话与事件仍可查询 |
 | 失败边界 | 无鉴权健康检查被拒绝；不存在的目录、不可用模型和不支持的 effort 分别返回明确错误 |
 
-以上为 `0.2.0` 的历史实机验收，Workspace 注册行为已经在 `0.2.1` 移除。`0.2.2` 的目录校验、模型回执、生命周期和事件预算修复使用自动测试验证；尚未安装到真实 Desktop 验收。安装后的实机检查仍需操作者执行。第三方插件功能及其他 Desktop / Codex CLI 版本不在此范围内。
+以上为 `0.2.0` 的历史实机验收，Workspace 注册行为已经在 `0.2.1` 移除。`0.2.2` 的目录校验、模型回执、生命周期和事件预算修复使用自动测试验证；本仓库未记录该版本的完整 Desktop 实机验收。`0.2.3` 新增的事件投影、分片恢复和分页契约须通过构建、回归测试及发布包冒烟检查；这些离线检查与源码、日志分析都不能证明实机验收。本次未将 `0.2.3` 安装到真实 Desktop，未重启 Desktop；安装后的实机检查仍需操作者执行。第三方插件功能及其他 Desktop / Codex CLI 版本不在此范围内。
 
 ## 源码导航 / Source Map
 

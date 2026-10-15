@@ -3,10 +3,10 @@ import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { connectionFileSchema } from '@dsh-codex-bridge/protocol'
+import { connectionFileSchema, delegateResponseSchema, followResponseSchema, waitResponseSchema, type FollowResponse } from '@dsh-codex-bridge/protocol'
 import { BridgeHttpServer } from '../src/server.js'
 import { BridgeRuntime } from '../src/runtime.js'
-import type { BridgeContext, SessionControllerLike } from '../src/types.js'
+import type { BridgeContext, FollowFrame, SessionControllerLike, WireEvent } from '../src/types.js'
 
 function runtime() {
   return {
@@ -64,6 +64,106 @@ describe('loopback server', () => {
     expect(await oversized.json()).toMatchObject({ error: { code: 'REQUEST_TOO_LARGE' } })
     expect(h.bridge.status).not.toHaveBeenCalled()
     await h.server.stop()
+  })
+
+  it('reads a completed final over repeated HTTP pages without delegating or prompting again', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'bridge-http-task-'))
+    const tail = 'http-final-tail:終🙂e\u0301'
+    const text = 'HTTP 合成🙂e\u0301 "quoted" \\\n\t\u0000'.repeat(1_200) + tail
+    const final = {
+      turn: 1,
+      step: 9,
+      message: { id: 'http-final', role: 'assistant', content: [{ type: 'reasoning', text: 'synthetic reasoning first' }, { type: 'text', text }] },
+    }
+    const records: { type: 'event'; event: WireEvent }[] = Array.from({ length: 8 }, (_, index) => ({
+      type: 'event',
+      event: {
+        type: 'assistant/message', seq: index + 1, time: index + 1,
+        data: { message: { role: 'assistant', content: [{ type: 'text', text: 'synthetic progress '.repeat(150) }] } },
+      },
+    }))
+    records.push(
+      { type: 'event', event: { type: 'assistant/message', seq: 100, time: 100, data: { ...final, stream: [{ text: 'internal stream '.repeat(600) }] } } },
+      { type: 'event', event: { type: 'turn/end', seq: 101, time: 101, data: { reason: { kind: 'completed' } } } },
+    )
+    const create = vi.fn(async () => ({ sessionId: 'http-session' }))
+    const prompt = vi.fn(async () => ({ accepted: true as const }))
+    const list = vi.fn(async () => ({ items: [{ sessionId: 'http-session', running: false, agentAvailable: true, blank: false, updatedAt: 101 }] }))
+    const follow = vi.fn(async function* (_request: unknown, signal: AbortSignal): AsyncIterable<FollowFrame> {
+      yield { type: 'snapshot', cursor: 101, records }
+      if (!signal.aborted) await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const controller = { create, prompt, list, follow } as unknown as SessionControllerLike
+    const bridge = new BridgeRuntime({ sessionController: controller, workspaceRegistry: { list: () => [] } } as unknown as BridgeContext, crypto.randomUUID(), 128, 10)
+    const h = await start(bridge)
+    const post = async (path: string, body: unknown): Promise<unknown> => {
+      const response = await fetch(h.connection.endpoint + path, {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + h.connection.token, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(2_000),
+      })
+      expect(response.status).toBe(200)
+      return await response.json() as unknown
+    }
+    try {
+      const delegated = delegateResponseSchema.parse(await post('/v1/delegate', { task: 'synthetic pagination fixture', cwd }))
+      expect(delegated.sessionId).toBe('http-session')
+      const first = waitResponseSchema.parse(await post('/v1/wait', { sessionId: delegated.sessionId, timeoutMs: 1_000 }))
+      expect(first).toMatchObject({ timedOut: false, hasMore: true, truncated: false, status: { status: 'completed', terminal: true } })
+      expect(first.events.some(event => event.durableSeq === 100 || event.durableSeq === 101)).toBe(false)
+      expect(first.nextCursor).not.toBe(first.status.lastCursor)
+      expect(waitResponseSchema.parse(await post('/v1/wait', { sessionId: delegated.sessionId, timeoutMs: 1_000 }))).toEqual(first)
+      let page: FollowResponse = first
+      const events = [...first.events]
+      let pages = 1
+      const expectBudget = (value: FollowResponse): void => {
+        expect(Buffer.byteLength(JSON.stringify(value.events))).toBeLessThanOrEqual(16 * 1024)
+        for (const event of value.events) expect(Buffer.byteLength(JSON.stringify(event))).toBeLessThanOrEqual(4 * 1024)
+      }
+      expectBudget(first)
+      while (page.hasMore) {
+        const cursor = page.nextCursor
+        expect(cursor).toBeDefined()
+        const request = { sessionId: delegated.sessionId, cursor, limit: 500 }
+        page = followResponseSchema.parse(await post('/v1/follow', request))
+        expect(followResponseSchema.parse(await post('/v1/follow', request))).toEqual(page)
+        expectBudget(page)
+        expect(page).toMatchObject({ truncated: false, status: { status: 'completed', terminal: true } })
+        expect(page.events.length).toBeGreaterThan(0)
+        expect(page.nextCursor).toBe(page.events.at(-1)!.cursor)
+        expect(page.nextCursor).not.toBe(cursor)
+        events.push(...page.events)
+        pages += 1
+        expect(pages).toBeLessThan(100)
+      }
+      expect(pages).toBeGreaterThan(2)
+      expect(new Set(events.map(event => event.cursor)).size).toBe(events.length)
+      const chunks = events.filter(event => event.durableSeq === 100)
+      expect(chunks.length).toBeGreaterThan(1)
+      const firstChunk = chunks[0]!.data as { id: string; total: number }
+      expect(firstChunk.id).toBe(chunks[0]!.cursor)
+      expect(firstChunk.total).toBe(chunks.length)
+      const pieces = chunks.map((event, index) => {
+        expect(event).toMatchObject({ kind: 'dsh-event', eventType: 'assistant/message', durableSeq: 100, time: 100 })
+        expect(event.data).toMatchObject({ bridgeContentChunk: true, id: firstChunk.id, index, total: chunks.length, encoding: 'json' })
+        return (event.data as { text: string }).text
+      })
+      const restored = JSON.parse(pieces.join('')) as typeof final
+      expect(restored).toEqual(final)
+      expect(Buffer.from(JSON.stringify(restored.message.content))).toEqual(Buffer.from(JSON.stringify(final.message.content)))
+      expect(Buffer.from(restored.message.content[1]!.text)).toEqual(Buffer.from(text))
+      expect(restored.message.content[1]!.text.endsWith(tail)).toBe(true)
+      expect(events.at(-1)).toMatchObject({ eventType: 'turn/end', durableSeq: 101 })
+      expect(page.nextCursor).toBe(first.status.lastCursor)
+      const empty = waitResponseSchema.parse(await post('/v1/wait', { sessionId: delegated.sessionId, cursor: page.nextCursor, timeoutMs: 1_000 }))
+      expect(empty).toMatchObject({ events: [], nextCursor: page.nextCursor, hasMore: false, truncated: false, timedOut: false, status: { status: 'completed' } })
+      expect(create).toHaveBeenCalledOnce()
+      expect(prompt).toHaveBeenCalledOnce()
+      expect(follow).toHaveBeenCalledOnce()
+    } finally {
+      await h.server.stop()
+    }
   })
 
   it('aborts a long wait when the HTTP client disconnects', async () => {

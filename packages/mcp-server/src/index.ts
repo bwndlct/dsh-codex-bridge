@@ -71,7 +71,7 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   })
 
   server.registerTool('dsh_wait', {
-    description: 'Wait for durable turn completion, cancellation, error, idle after a turn, or timeout. Timeout never cancels the session. Bounded filtered events are returned once as text JSON; save nextCursor and check truncated and event content-truncation markers.',
+    description: 'Wait for durable turn completion, cancellation, error, idle after a turn, or timeout. Timeout never cancels the session. Returns one page of filtered events bounded to 16 KiB as text JSON. When hasMore is true, call dsh_follow with nextCursor until hasMore is false, even if status.terminal is true; never use status.lastCursor to skip unread events. truncated marks a history gap. For data.bridgeContentChunk, deduplicate by event cursor, group by data.id, and join data.text in data.index order only after receiving every index from 0 through data.total-1, then JSON.parse to restore the projected data; missing chunks mean incomplete content.',
     inputSchema: z.object({
       sessionId: z.string().min(1),
       timeoutMs: z.number().int().min(0).max(MAX_WAIT_MS).default(30_000),
@@ -88,7 +88,7 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   })
 
   server.registerTool('dsh_follow', {
-    description: 'Return filtered incremental durable events after an opaque bridge cursor. Event pages are bounded to 16 KiB and returned once as text JSON. Save nextCursor; truncated marks a history gap, and bridgeContentTruncated marks shortened event content.',
+    description: 'Return one page of filtered incremental durable events after an opaque bridge cursor, bounded to 16 KiB as text JSON. When hasMore is true, call dsh_follow with nextCursor until hasMore is false, even if status.terminal is true; never use status.lastCursor to skip unread events. truncated marks a history gap. For data.bridgeContentChunk, deduplicate by event cursor, group by data.id, and join data.text in data.index order only after receiving every index from 0 through data.total-1, then JSON.parse to restore the projected data; missing chunks mean incomplete content.',
     inputSchema: z.object({
       sessionId: z.string().min(1),
       cursor: z.string().min(1).optional(),

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const BRIDGE_VERSION = '0.2.2'
+export const BRIDGE_VERSION = '0.2.3'
 export const DEFAULT_BRIDGE_PORT = 43127
 export const DEFAULT_EVENT_LIMIT = 512
 export const MAX_EVENT_LIMIT = 4096
@@ -57,6 +57,20 @@ export const trackedEventSchema = z.object({
 }).strict()
 export type TrackedEvent = z.infer<typeof trackedEventSchema>
 
+export const bridgeContentChunkSchema = z.object({
+  bridgeContentChunk: z.literal(true),
+  id: z.string().min(1),
+  index: z.number().int().nonnegative(),
+  total: z.number().int().positive(),
+  encoding: z.literal('json'),
+  text: z.string(),
+}).strict().superRefine((value, context) => {
+  if (value.index >= value.total) {
+    context.addIssue({ code: 'custom', path: ['index'], message: 'index must be less than total' })
+  }
+})
+export type BridgeContentChunk = z.infer<typeof bridgeContentChunkSchema>
+
 export const statusResponseSchema = z.object({
   sessionId: z.string(),
   status: bridgeStatusSchema,
@@ -93,6 +107,7 @@ export const followResponseSchema = z.object({
   sessionId: z.string(),
   events: z.array(trackedEventSchema),
   nextCursor: z.string().optional(),
+  hasMore: z.boolean(),
   truncated: z.boolean(),
   status: statusResponseSchema,
 }).strict()
@@ -104,6 +119,7 @@ export const waitResponseSchema = z.object({
   status: statusResponseSchema,
   events: z.array(trackedEventSchema),
   nextCursor: z.string().optional(),
+  hasMore: z.boolean(),
   truncated: z.boolean(),
 }).strict()
 export type WaitResponse = z.infer<typeof waitResponseSchema>

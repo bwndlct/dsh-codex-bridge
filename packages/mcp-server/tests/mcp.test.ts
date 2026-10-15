@@ -118,6 +118,13 @@ describe('MCP framing', () => {
       expect(tools.tools.map(tool => tool.name)).toEqual([
         'dsh_delegate', 'dsh_status', 'dsh_wait', 'dsh_follow', 'dsh_cancel',
       ])
+      for (const name of ['dsh_wait', 'dsh_follow']) {
+        const description = tools.tools.find(tool => tool.name === name)?.description
+        expect(description).toContain('hasMore')
+        expect(description).toContain('nextCursor')
+        expect(description).toContain('status.terminal')
+        expect(description).toContain('JSON.parse')
+      }
       const response = await client.callTool({ name: 'dsh_delegate', arguments: { task: 'work', cwd: process.cwd() } })
       expect(response.structuredContent).toEqual({ sessionId: 'session-1', status: 'queued', guidance: 'Use dsh_wait.' })
       expect(response.content).toEqual([{ type: 'text', text: JSON.stringify(response.structuredContent) }])
@@ -205,8 +212,8 @@ describe('MCP framing', () => {
     }
     const response = {
       sessionId: 'session-1', status,
-      events: [{ cursor: 'cursor-2', kind: 'dsh-event', durableSeq: 2, eventType: 'turn_end', data: { text: 'complete output', bridgeContentTruncated: true }, time: 12 }],
-      nextCursor: 'cursor-2', truncated: true,
+      events: [{ cursor: 'cursor-2', kind: 'dsh-event', durableSeq: 2, eventType: 'assistant/message', data: { bridgeContentChunk: true, id: 'cursor-2', index: 0, total: 2, encoding: 'json', text: '{"message":{"content":[' }, time: 12 }],
+      nextCursor: 'cursor-2', hasMore: true, truncated: false,
       ...(name === 'dsh_wait' ? { timedOut: false } : {}),
     }
     const call = vi.fn(async () => response)
@@ -223,6 +230,69 @@ describe('MCP framing', () => {
         expect(call).toHaveBeenCalledWith('/v1/wait', { sessionId: 'session-1', cursor: 'cursor-1', timeoutMs: 30_000 }, 35_000)
       } else {
         expect(call).toHaveBeenCalledWith('/v1/follow', { sessionId: 'session-1', cursor: 'cursor-1', limit: 100 })
+      }
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
+
+  it('continues completed output explicitly and preserves chunk text across MCP pages', async () => {
+    const projected = {
+      turn: 1,
+      step: 2,
+      message: {
+        id: 'message-1', role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'thinking '.repeat(350) },
+          { type: 'text', text: '正文😀"\\\n'.repeat(160) + 'final tail' },
+        ],
+      },
+    }
+    const serialized = JSON.stringify(projected)
+    const split = serialized.indexOf('"type":"text"')
+    expect(split).toBeGreaterThan(0)
+    const status = {
+      sessionId: 'session-1', status: 'completed', terminal: true,
+      raw: { running: false, agentAvailable: true, blank: false, updatedAt: 12 },
+      lastCursor: 'cursor-2', lastTurnEndSeq: 3,
+    }
+    const pages = [serialized.slice(0, split), serialized.slice(split)].map((text, index) => ({
+      sessionId: 'session-1', status,
+      events: [{
+        cursor: `cursor-${String(index + 1)}`, kind: 'dsh-event', durableSeq: 2,
+        eventType: 'assistant/message', time: 12,
+        data: { bridgeContentChunk: true, id: 'cursor-1', index, total: 2, encoding: 'json', text },
+      }],
+      nextCursor: `cursor-${String(index + 1)}`, hasMore: index === 0, truncated: false,
+    }))
+    const call = vi.fn()
+      .mockResolvedValueOnce({ ...pages[0]!, timedOut: false })
+      .mockResolvedValueOnce(pages[1]!)
+    const server = createMcpServer({ call } as unknown as BridgeClient)
+    const client = new Client({ name: 'test-client', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    try {
+      const wait = await client.callTool({ name: 'dsh_wait', arguments: { sessionId: 'session-1', timeoutMs: 0 } })
+      expect(wait.structuredContent).toBeUndefined()
+      expect(wait.content).toEqual([{ type: 'text', text: JSON.stringify({ ...pages[0]!, timedOut: false }) }])
+      expect(call).toHaveBeenCalledTimes(1)
+      expect(call).toHaveBeenLastCalledWith('/v1/wait', { sessionId: 'session-1', timeoutMs: 0 }, 5_000)
+      expect(pages[0]!.status.terminal).toBe(true)
+      expect(pages[0]!.hasMore).toBe(true)
+      const follow = await client.callTool({ name: 'dsh_follow', arguments: { sessionId: 'session-1', cursor: pages[0]!.nextCursor } })
+      expect(follow.structuredContent).toBeUndefined()
+      expect(follow.content).toEqual([{ type: 'text', text: JSON.stringify(pages[1]!) }])
+      expect(call).toHaveBeenCalledTimes(2)
+      expect(call).toHaveBeenLastCalledWith('/v1/follow', { sessionId: 'session-1', cursor: 'cursor-1', limit: 100 })
+      expect(pages[1]!.hasMore).toBe(false)
+      const chunks = pages.flatMap(page => page.events.map(event => event.data))
+      expect(chunks.map(chunk => chunk.index)).toEqual([0, 1])
+      expect(JSON.parse(chunks.map(chunk => chunk.text).join(''))).toEqual(projected)
+      for (const page of pages) {
+        expect(Buffer.byteLength(JSON.stringify(page.events))).toBeLessThanOrEqual(16 * 1024)
+        expect(Buffer.byteLength(JSON.stringify(page.events[0]))).toBeLessThanOrEqual(4 * 1024)
       }
     } finally {
       await client.close()

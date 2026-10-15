@@ -279,7 +279,20 @@ export class EventTracker {
       const fields = event.type === 'permission/preset' ? ['preset'] : event.type === 'sandbox/mode' ? ['mode', 'source'] : ['policy', 'source']
       for (const key of fields) if (typeof data[key] === 'string') safe[key] = data[key]
       this.push(track, 'dsh-event', safe, event.seq, event.type, event.time)
-    } else if (['assistant/message', 'turn/start', 'turn/end', 'assistant/error', 'error'].includes(event.type)) {
+    } else if (event.type === 'assistant/message') {
+      const data = this.object(event.data)
+      const message = this.object(data.message)
+      const source = this.object(message.source)
+      const safe: Record<string, unknown> = {}
+      const safeMessage: Record<string, unknown> = {}
+      const safeSource: Record<string, unknown> = {}
+      for (const key of ['turn', 'step']) if (key in data) safe[key] = data[key]
+      for (const key of ['id', 'role', 'content']) if (key in message) safeMessage[key] = message[key]
+      for (const key of ['kind', 'provider', 'model']) if (typeof source[key] === 'string') safeSource[key] = source[key]
+      if (Object.keys(safeSource).length > 0) safeMessage.source = safeSource
+      safe.message = safeMessage
+      this.push(track, 'dsh-event', safe, event.seq, event.type, event.time)
+    } else if (['turn/start', 'turn/end', 'assistant/error', 'error'].includes(event.type)) {
       this.push(track, 'dsh-event', event.data, event.seq, event.type, event.time, notify)
     }
   }
@@ -311,35 +324,78 @@ export class EventTracker {
     time = Date.now(),
     notify = false,
   ): void {
-    const cursor = this.cursor(track, ++track.ordinal)
-    let event: TrackedEvent = { cursor, kind, time, ...(durableSeq === undefined ? {} : { durableSeq }), ...(eventType === undefined ? {} : { eventType }), data }
-    const serialized = JSON.stringify(event)
-    const originalBytes = Buffer.byteLength(serialized)
-    if (originalBytes > MAX_EVENT_BYTES) {
-      const content = JSON.stringify(data)
-      event = { ...event, data: { bridgeContentTruncated: true, originalBytes, preview: Buffer.from(content).subarray(0, 1000).toString('utf8') } }
+    const cursor = this.cursor(track, track.ordinal + 1)
+    const event: TrackedEvent = { cursor, kind, time, ...(durableSeq === undefined ? {} : { durableSeq }), ...(eventType === undefined ? {} : { eventType }), data }
+    if (Buffer.byteLength(JSON.stringify(event)) <= MAX_EVENT_BYTES) {
+      track.ordinal += 1
+      track.events.push(event)
+    } else {
+      const content = Buffer.from(JSON.stringify(data), 'utf8')
+      const boundaries: number[] = []
+      // Byte length bounds the number of chunks, so these fields reserve enough
+      // digits for every final index, total, and cursor without a sizing cycle.
+      const template = {
+        ...event,
+        cursor: this.cursor(track, track.ordinal + content.length),
+        data: { bridgeContentChunk: true, id: cursor, index: content.length, total: content.length, encoding: 'json', text: '' },
+      }
+      let offset = 0
+      while (offset < content.length) {
+        let low = offset + 1
+        let high = Math.min(content.length, offset + MAX_EVENT_BYTES)
+        let end = offset
+        while (low <= high) {
+          const midpoint = Math.floor((low + high) / 2)
+          let boundary = midpoint
+          while (boundary > offset && boundary < content.length && (content[boundary]! & 0xc0) === 0x80) boundary -= 1
+          const text = content.subarray(offset, boundary).toString('utf8')
+          const candidate = { ...template, data: { ...template.data, text } }
+          if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_EVENT_BYTES) {
+            end = boundary
+            low = midpoint + 1
+          } else {
+            high = midpoint - 1
+          }
+        }
+        if (end === offset) throw new Error('Bridge event metadata exceeds the event byte limit.')
+        boundaries.push(end)
+        offset = end
+      }
+      offset = 0
+      for (const [index, end] of boundaries.entries()) {
+        track.events.push({
+          ...event,
+          cursor: this.cursor(track, ++track.ordinal),
+          data: { bridgeContentChunk: true, id: cursor, index, total: boundaries.length, encoding: 'json', text: content.subarray(offset, end).toString('utf8') },
+        })
+        if (track.events.length > this.eventLimit) track.events.splice(0, track.events.length - this.eventLimit)
+        offset = end
+      }
     }
-    track.events.push(event)
     if (track.events.length > this.eventLimit) track.events.splice(0, track.events.length - this.eventLimit)
     track.lastTouched = Date.now()
     if (notify) for (const listener of [...track.listeners]) listener()
   }
 
-  private since(track: SessionTrack, cursor: string | undefined, limit: number): { readonly events: TrackedEvent[]; readonly meta: Pick<FollowResponse, 'nextCursor' | 'truncated'> } {
+  private since(track: SessionTrack, cursor: string | undefined, limit: number): { readonly events: TrackedEvent[]; readonly meta: Pick<FollowResponse, 'nextCursor' | 'truncated' | 'hasMore'> } {
     const ordinal = cursor === undefined ? 0 : this.parseCursor(track, cursor)
     const firstOrdinal = track.events.length === 0 ? track.ordinal + 1 : this.parseCursor(track, track.events[0]!.cursor)
     const truncated = ordinal < firstOrdinal - 1
     const events: TrackedEvent[] = []
     let bytes = 2
+    let hasMore = false
     for (const event of track.events) {
       if (this.parseCursor(track, event.cursor) <= ordinal) continue
       const size = Buffer.byteLength(JSON.stringify(event)) + (events.length === 0 ? 0 : 1)
-      if (events.length === limit || bytes + size > MAX_RESPONSE_EVENT_BYTES) break
+      if (events.length === limit || bytes + size > MAX_RESPONSE_EVENT_BYTES) {
+        hasMore = true
+        break
+      }
       events.push(event)
       bytes += size
     }
     const nextCursor = events.at(-1)?.cursor ?? cursor
-    return { events, meta: { ...(nextCursor === undefined ? {} : { nextCursor }), truncated } }
+    return { events, meta: { ...(nextCursor === undefined ? {} : { nextCursor }), truncated, hasMore } }
   }
 
   private cursor(track: SessionTrack, ordinal: number): string {

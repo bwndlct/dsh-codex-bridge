@@ -138,6 +138,7 @@ export class BridgeRuntime {
       events: result.follow.events,
       ...(result.follow.nextCursor === undefined ? {} : { nextCursor: result.follow.nextCursor }),
       truncated: result.follow.truncated,
+      hasMore: result.follow.hasMore,
     }
   }
 

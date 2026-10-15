@@ -16,7 +16,7 @@
 
 > Supports only official Desktop **`0.2.0-rc.2`**. The bridge never starts Desktop, calls a model provider directly, or reads or edits persisted Session files directly.
 >
-> Upgrading to `0.2.2`? Update both the Desktop plugin and MCP server, and pass absolute `cwd` on every delegation. Read MCP `dsh_wait` / `dsh_follow` results as JSON from `content[0].text`. See the [release notes](<CHANGELOG.md>).
+> Upgrading to `0.2.3`? Update both the Desktop plugin and MCP server, and pass absolute `cwd` on every delegation. Read MCP `dsh_wait` / `dsh_follow` results as JSON from `content[0].text`, then use `hasMore` / `nextCursor` to drain pages and reassemble chunks. See the [release notes](<CHANGELOG.md>).
 
 ## Quick Start
 
@@ -75,6 +75,8 @@ Call `dsh_delegate`, **always passing the current Codex task's absolute `cwd`**:
 Replace the `your-provider` placeholder with the provider ID configured in Desktop. The model route and effort must match the Host catalog. Omit `model` to inherit the current model; `reasoningEffort` also works on its own. A default-directory environment setting no longer substitutes for `cwd`. A matching Workspace title must be unique, and its canonical directory must equal the task directory; otherwise admission is rejected before Session creation. The response `cwd` is the Session execution directory. With no match, `workspace.matched` is `false` and `workspace.id` is omitted.
 
 Use the returned `sessionId` with `dsh_wait`, or open the Session in Desktop.
+
+To read results, parse `content[0].text` and deduplicate events by `cursor`. While `hasMore` is true, call `dsh_follow` with the page's `nextCursor` until it is false. `status.terminal` only means execution ended; never replace the consumed cursor with `status.lastCursor`. For `data.bridgeContentChunk: true`, group by `data.id`, collect every `index = 0..total-1`, join the `text` fragments in order, then `JSON.parse` to recover the original `data`. The last chunk alone is incomplete. Retained history is bounded: report `truncated` or missing chunks as incomplete results. See [complete event consumption](<docs/reference.md#完整事件读取--complete-event-consumption>) for fields, budgets, and an example.
 
 | Tool | Purpose |
 | --- | --- |

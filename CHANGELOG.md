@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3 - 2026-10-15
+
+- Fix final-answer loss when large internal stream or replay metadata accompanied an assistant message. Project assistant events to turn/step, message ID/role and every content block (including reasoning), with source limited to kind/provider/model; omit internal stream and replay metadata.
+- Replace oversized event previews with reversible chunks. Events whose complete serialized envelope fits within 4 KiB retain their projected data; larger data is serialized as JSON and split into consecutive `text` fragments in flat `data: { bridgeContentChunk: true, id, index, total, encoding: "json", text }` envelopes. `id` is the first chunk's cursor, and `index` starts at zero. Each serialized event stays within 4 KiB and each serialized page's `events` array within 16 KiB.
+- Add required `hasMore` to follow/wait responses. Continue from each page's `nextCursor` while it is true, even when `status.terminal` is true. Do not substitute `status.lastCursor` for the consumed cursor. Deduplicate by event cursor, collect every chunk index from `0` through `total - 1` by chunk ID, then `join('')` and `JSON.parse` to recover the projected data; a final chunk alone is incomplete.
+- Retain the in-memory ring defaults (512 entries, configurable up to 4096). Each chunk consumes one entry and can expire; `truncated` still means a retained-history gap, and missing chunk indexes must be reported as incomplete data.
+- Keep the five MCP tools, fixed HTTP routes, request parameters, timeout behavior, and no automatic redispatch. `dsh_wait` / `dsh_follow` still return JSON only in `content[0].text`.
+- Update the Desktop plugin and MCP server together; discovery requires `0.2.3`. Host support remains official Desktop `0.2.0-rc.2`. No live Desktop installation or acceptance was performed for this release; source/log analysis and offline checks do not establish live acceptance.
+
 ## 0.2.2 - 2026-10-08
 
 - Reject ambiguous Workspace titles and canonical directory mismatches before creating a Session; retain ungrouped admission when no title matches.

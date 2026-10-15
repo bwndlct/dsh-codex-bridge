@@ -16,7 +16,7 @@
 
 > 仅支持官方 Desktop **`0.2.0-rc.2`**。桥接不启动 Desktop、不直接调用模型服务，也不直接读写持久化 Session 文件。
 >
-> 升级到 `0.2.2` 时，Desktop 插件与 MCP 服务须一起更新；每次委托都要传绝对 `cwd`。`dsh_wait` / `dsh_follow` 的 MCP 结果请读取 `content[0].text` 中的 JSON。详见[发布说明](<CHANGELOG.md>)。
+> 升级到 `0.2.3` 时，Desktop 插件与 MCP 服务须一起更新；每次委托都要传绝对 `cwd`。`dsh_wait` / `dsh_follow` 的 MCP 结果请读取 `content[0].text` 中的 JSON，并按 `hasMore` / `nextCursor` 继续读取和重组分片。详见[发布说明](<CHANGELOG.md>)。
 
 ## 快速开始
 
@@ -75,6 +75,8 @@ DSH_HOME = "/absolute/path/to/the-Desktop-dsh-home"
 `your-provider` 为占位符，请替换为 Desktop 中实际配置的 provider ID。模型路径和推理程度须匹配 Host 目录；可省略 `model` 以继承当前模型，`reasoningEffort` 也可以单独传。默认目录环境变量不再替代 `cwd`。同名工作区必须唯一，且其规范化目录必须等于任务目录，否则创建前拒绝。成功响应的 `cwd` 是 Session 的执行目录。未匹配时 `workspace.matched` 为 `false`，不返回 `workspace.id`。
 
 拿到 `sessionId` 后，用 `dsh_wait` 等待结果，或在 Desktop 中打开该会话。
+
+读取结果时先解析 `content[0].text`，按事件 `cursor` 去重；`hasMore: true` 时用本页 `nextCursor` 继续 `dsh_follow`，直到 `hasMore: false`。`status.terminal` 只表示执行结束，`status.lastCursor` 不能替代已消费的游标。遇到 `data.bridgeContentChunk: true`，按 `data.id` 收集全部 `index = 0..total-1`，依次拼接 `text` 后再 `JSON.parse`，才能恢复原 `data`；单独最后一片不能当完整答复。历史有界，`truncated` 或缺片时应明确报告结果不完整。字段、预算与示例见[完整事件读取](<docs/reference.md#完整事件读取--complete-event-consumption>)。
 
 | 工具 | 用途 |
 | --- | --- |
