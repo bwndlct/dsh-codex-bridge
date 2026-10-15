@@ -45,7 +45,9 @@ export interface WireEvent {
 export interface SessionControllerLike {
   create(request: { readonly workspaceId?: string; readonly cwd?: string }): Promise<{ readonly sessionId: string }>
   modelCatalog(): Promise<ModelCatalog>
-  selectModel(request: { readonly sessionId: string; readonly provider: string; readonly model: string; readonly reasoningEffort?: string }): Promise<unknown>
+  selectModel(request: { readonly sessionId: string; readonly provider: string; readonly model: string; readonly reasoningEffort?: string }): Promise<{
+    readonly selected: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
+  }>
   prompt(request: {
     readonly requestId: string
     readonly sessionId: string
@@ -55,7 +57,7 @@ export interface SessionControllerLike {
   list(request: Record<string, never>, signal: AbortSignal): Promise<{ readonly items: readonly SessionSummary[] }>
   follow(request: {
     readonly address: { readonly kind: 'session'; readonly sessionId: string }
-    readonly assistantStream: true
+    readonly assistantStream: false
   }, signal: AbortSignal): AsyncIterable<FollowFrame>
   cancel(request: { readonly sessionId: string }): Promise<{ readonly accepted: true }> | { readonly accepted: true }
 }

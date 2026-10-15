@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { basename, isAbsolute, resolve } from 'node:path'
 import {
   BridgeError,
+  delegateResponseSchema,
   type CancelResponse,
   type DelegateRequest,
   type DelegateResponse,
@@ -14,6 +15,8 @@ import {
 } from '@dsh-codex-bridge/protocol'
 import { EventTracker } from './tracker.js'
 import type { BridgeContext, ModelCatalog } from './types.js'
+
+const selectedModelSchema = delegateResponseSchema.shape.model.unwrap().omit({ source: true })
 
 export class BridgeRuntime {
   readonly tracker: EventTracker
@@ -28,6 +31,7 @@ export class BridgeRuntime {
   }
 
   async delegate(request: DelegateRequest, signal: AbortSignal): Promise<DelegateResponse> {
+    signal.throwIfAborted()
     const task = request.task.trim()
     if (task.length === 0) throw new BridgeError('INVALID_TASK', 'task must be nonempty', 400)
     const cwd = await this.resolveDirectory(request.cwd)
@@ -45,18 +49,45 @@ export class BridgeRuntime {
         source: request.model === undefined ? 'default' : 'override',
       }
     }
-    this.tracker.ensureCapacity()
-    const workspace = this.ctx.workspaceRegistry.list().find(candidate => candidate.title === basename(cwd))
-    const created = await this.ctx.sessionController.create(workspace === undefined
-      ? { cwd }
-      : { workspaceId: workspace.id })
-    this.tracker.start(created.sessionId)
+    const matches = this.ctx.workspaceRegistry.list().filter(candidate => candidate.title === basename(cwd))
+    if (matches.length > 1) {
+      throw new BridgeError('WORKSPACE_AMBIGUOUS', 'Multiple Workspaces match the task directory name; no Session was created.', 409)
+    }
+    const workspace = matches[0]
+    if (workspace !== undefined) {
+      const executionCwd = await this.resolveDirectory(workspace.path)
+      if (executionCwd !== cwd) {
+        throw new BridgeError('WORKSPACE_CWD_MISMATCH', 'The matching Workspace points to a different task directory; no Session was created.', 409, {
+          expected: cwd, observed: executionCwd, workspaceId: workspace.id,
+        })
+      }
+    }
+    signal.throwIfAborted()
+    const release = this.tracker.reserveCapacity()
+    let created: { sessionId: string } | undefined
     try {
+      created = await this.ctx.sessionController.create(workspace === undefined
+        ? { cwd }
+        : { workspaceId: workspace.id })
+      release()
+      this.tracker.start(created.sessionId)
+      signal.throwIfAborted()
       if (selection !== undefined) {
         const { provider, model, reasoningEffort } = selection
-        await this.ctx.sessionController.selectModel({ sessionId: created.sessionId, provider, model,
+        const acknowledgement = await this.ctx.sessionController.selectModel({ sessionId: created.sessionId, provider, model,
           ...(reasoningEffort === undefined ? {} : { reasoningEffort }) })
+        const selected = selectedModelSchema.safeParse(acknowledgement?.selected)
+        if (!selected.success) {
+          throw new BridgeError('INVALID_MODEL_SELECTION', 'The Host returned an invalid model selection acknowledgement.', 502)
+        }
+        if (selected.data.provider !== provider || selected.data.model !== model
+          || (reasoningEffort !== undefined && selected.data.reasoningEffort !== reasoningEffort)) {
+          throw new BridgeError('MODEL_SELECTION_MISMATCH', 'The Host selection does not match the requested model and effort.', 502)
+        }
+        selection = { ...selected.data, source: selection.source }
       }
+      signal.throwIfAborted()
+      this.tracker.assertTracked(created.sessionId)
       await this.ctx.sessionController.prompt({
         requestId: randomUUID(),
         sessionId: created.sessionId,
@@ -64,19 +95,23 @@ export class BridgeRuntime {
         content: [{ type: 'text', text: task }],
       }, signal)
     } catch (error) {
-      const cause = error instanceof Error ? error.message : String(error)
+      if (created === undefined) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      const cause = Buffer.byteLength(message) <= 2_048 ? message : Buffer.from(message).subarray(0, 2_048).toString('utf8') + ' [truncated]'
       this.tracker.recordError(created.sessionId, cause)
       throw new BridgeError(
         'SESSION_ADMISSION_FAILED',
-        'A DSH Host session was created, but model selection or prompt admission failed.',
+        'A DSH Host session was created, but tracking, model selection or prompt admission failed.',
         502,
-        { sessionId: created.sessionId, cause },
+        { sessionId: created.sessionId, cause, ...(error instanceof BridgeError ? { code: error.code } : {}) },
       )
+    } finally {
+      release()
     }
     return {
       sessionId: created.sessionId,
       status: 'queued',
-      cwd: workspace?.path ?? cwd,
+      cwd,
       workspace: {
         matched: workspace !== undefined,
         ...(workspace === undefined ? {} : { id: workspace.id }),

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { connectionFileSchema } from '@dsh-codex-bridge/protocol'
 import { BridgeHttpServer } from '../src/server.js'
-import type { BridgeRuntime } from '../src/runtime.js'
+import { BridgeRuntime } from '../src/runtime.js'
+import type { BridgeContext, SessionControllerLike } from '../src/types.js'
 
 function runtime() {
   return {
@@ -95,5 +96,34 @@ describe('loopback server', () => {
     request.destroy()
     await expect(observed).resolves.toBeUndefined()
     await h.server.stop()
+  })
+
+  it('stops an in-flight HTTP wait immediately without restarting Host subscriptions', async () => {
+    const list = vi.fn(async () => ({ items: [{ sessionId: 's1', running: true, agentAvailable: true, blank: false, updatedAt: 1 }] }))
+    const follow = vi.fn(async function* (_request: unknown, signal: AbortSignal) {
+      yield { type: 'snapshot', cursor: -1, records: [] }
+      if (!signal.aborted) await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+    })
+    const controller = { list, follow } as unknown as SessionControllerLike
+    const bridge = new BridgeRuntime({ sessionController: controller } as BridgeContext, crypto.randomUUID(), 32, 10)
+    const h = await start(bridge)
+    try {
+      const pending = fetch(h.connection.endpoint + '/v1/wait', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + h.connection.token, 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: 's1', timeoutMs: 60_000 }),
+        signal: AbortSignal.timeout(2_000),
+      })
+      await vi.waitFor(() => expect(list.mock.calls.length).toBeGreaterThanOrEqual(2))
+      const stopped = h.server.stop()
+      const response = await pending
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ error: { code: 'BRIDGE_STOPPED' } })
+      await stopped
+      expect(follow).toHaveBeenCalledOnce()
+      await expect(bridge.status('s1', AbortSignal.timeout(100))).rejects.toMatchObject({ code: 'BRIDGE_STOPPED' })
+    } finally {
+      await h.server.stop()
+    }
   })
 })

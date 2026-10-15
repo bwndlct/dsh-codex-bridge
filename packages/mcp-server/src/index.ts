@@ -17,7 +17,7 @@ import { BridgeClient } from './client.js'
 function result(value: Record<string, unknown>): CallToolResult {
   return {
     content: [{ type: 'text', text: JSON.stringify(value) }],
-    structuredContent: value,
+    ...(Array.isArray(value.events) ? {} : { structuredContent: value }),
   }
 }
 
@@ -43,7 +43,7 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   const server = new McpServer({ name: 'dsh-codex-bridge', version: BRIDGE_VERSION })
 
   server.registerTool('dsh_delegate', {
-    description: 'Delegate a task to a new session in the running DSH Desktop Host. Pass the current Codex task directory as cwd. Reuse an existing DSH Workspace whose title matches the directory name; otherwise create an ungrouped Session at cwd in the default section. Never register a Workspace. The response cwd is the Session execution directory. Returns immediately after prompt admission.',
+    description: 'Delegate a task to a new session in the running DSH Desktop Host. Pass the current Codex task directory as cwd. A unique same-title Workspace must resolve to the same directory; mismatches are rejected before creation. Otherwise create an ungrouped Session at cwd. Never register a Workspace. Exact model selections are checked against the Host acknowledgement. Returns immediately after prompt admission, not task completion.',
     inputSchema: z.object({
       task: z.string().min(1).describe('Nonempty task for the DSH Host model.'),
       cwd: z.string().min(1).refine(isAbsolute, 'cwd must be absolute').describe('Required absolute working directory of the current Codex task, not the MCP process directory.'),
@@ -71,7 +71,7 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   })
 
   server.registerTool('dsh_wait', {
-    description: 'Wait for durable turn completion, cancellation, error, idle after a turn, or timeout. Timeout never cancels the session.',
+    description: 'Wait for durable turn completion, cancellation, error, idle after a turn, or timeout. Timeout never cancels the session. Bounded filtered events are returned once as text JSON; save nextCursor and check truncated and event content-truncation markers.',
     inputSchema: z.object({
       sessionId: z.string().min(1),
       timeoutMs: z.number().int().min(0).max(MAX_WAIT_MS).default(30_000),
@@ -88,7 +88,7 @@ export function createMcpServer(client = new BridgeClient()): McpServer {
   })
 
   server.registerTool('dsh_follow', {
-    description: 'Return bounded incremental durable and transient assistant events after an opaque bridge cursor.',
+    description: 'Return filtered incremental durable events after an opaque bridge cursor. Event pages are bounded to 16 KiB and returned once as text JSON. Save nextCursor; truncated marks a history gap, and bridgeContentTruncated marks shortened event content.',
     inputSchema: z.object({
       sessionId: z.string().min(1),
       cursor: z.string().min(1).optional(),

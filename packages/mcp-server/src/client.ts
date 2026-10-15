@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
   BridgeError,
+  BRIDGE_VERSION,
   bridgeErrorBodySchema,
   connectionFileSchema,
   routeResponseSchemas,
@@ -71,11 +72,25 @@ export class BridgeClient {
   }
 
   private async connection() {
+    let text: string
     try {
-      return connectionFileSchema.parse(JSON.parse(await readFile(this.connectionPath(), 'utf8')))
-    } catch {
-      throw new BridgeError('HOST_NOT_RUNNING', 'DSH Desktop bridge is not running.', 503)
+      text = await readFile(this.connectionPath(), 'utf8')
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
+      if (code === 'ENOENT') throw new BridgeError('HOST_NOT_RUNNING', 'DSH Desktop bridge is not running.', 503)
+      throw new BridgeError('HOST_CONNECTION_UNREADABLE', 'The DSH Desktop discovery file cannot be read.', 503, { code })
     }
+    let value: unknown
+    try { value = JSON.parse(text) }
+    catch { throw new BridgeError('INVALID_DISCOVERY_FILE', 'The DSH Desktop discovery file is not valid JSON.', 502) }
+    const parsed = connectionFileSchema.safeParse(value)
+    if (parsed.success) return parsed.data
+    if (typeof value === 'object' && value !== null && 'version' in value
+      && typeof value.version === 'string' && value.version !== BRIDGE_VERSION
+      && parsed.error.issues.every(issue => issue.path.length === 1 && issue.path[0] === 'version')) {
+      throw new BridgeError('HOST_VERSION_MISMATCH', 'The installed Host bridge version does not match this MCP server.', 409, { expected: BRIDGE_VERSION })
+    }
+    throw new BridgeError('INVALID_DISCOVERY_FILE', 'The DSH Desktop discovery file has an invalid shape or endpoint.', 502)
   }
 
   private async parseResponse(response: Response): Promise<unknown> {

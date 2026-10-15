@@ -6,7 +6,7 @@
 
 ## 安装与发现 / Installation and Discovery
 
-桥接 `0.2.1` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
+桥接 `0.2.2` 仅支持官方 `deepseek-ai/deepseek-harness` Desktop `0.2.0-rc.2`；早期桥接 `0.1.0` 对应 `0.2.0-rc.1`。已对照官方 App 包中 SessionController 与 Workspace 的运行代码核对创建、目录归属、模型/effort 选择和事件跟踪 API。安装与启用必须经过 Desktop 的 Plugins 页面；不手动修改运行配置、用户配置目录或 Session 文件。
 
 - 第一次安装：通过 HMR 应用，确认 `application: "applied"`，不把重启作为首次安装步骤。
 - 替换已安装包、加载已安装源码的新模块：可能返回 `restart-required`，重启由操作者决定。
@@ -27,9 +27,9 @@ Codex CLI `0.155.1` 的历史人工验证覆盖了 `dsh_delegate` 与 `dsh_wait`
 | `model` | 可选，精确的 `provider/model`，不做猜测或静默替换 |
 | `reasoningEffort` | 可选，模型目录中支持的精确 effort ID；可以不传 `model` |
 
-Host 先通过 `realpath` 规范化目录。传入模型或推理程度时，先校验模型目录，再按规范化目录的最后一段名称匹配已有 Workspace 的 `title`（区分大小写，按 DSH 展示顺序取首项）。匹配时按 `workspaceId` 创建 Session，执行目录由该工作区提供；没有同名项时按原 `cwd` 创建 Session，进入默认的未分组分区。整个委派过程不注册新工作区。
+Bridge 先通过 `realpath` 规范化目录。传入模型或推理程度时，先校验模型目录，再按规范化目录的最后一段名称匹配已有 Workspace 的 `title`（区分大小写）。同名多项返回 `WORKSPACE_AMBIGUOUS`；唯一匹配项的 `path` 经 `realpath` 后须等于任务目录，否则返回 `WORKSPACE_CWD_MISMATCH`。这些检查都在创建 Session 前完成。匹配时按 `workspaceId` 创建 Session；没有同名项时按规范化 `cwd` 创建 Session，进入默认的未分组分区。整个委派过程不注册新工作区。
 
-两项模型参数都省略时，不调用模型目录或 `selectModel`，直接继承 Host 当前选择。只传推理程度时，使用模型目录中的默认模型；默认模型缺失、不可用或 effort 不支持时明确失败。显式选择调用官方 `selectModel`，它还会后台保存 Host 默认选择。
+两项模型参数都省略时，不调用模型目录或 `selectModel`，直接继承 Host 当前选择。只传推理程度时，使用模型目录中的默认模型；默认模型缺失、不可用或 effort 不支持时明确失败。显式选择调用官方 `selectModel`，并检查其 `{ selected }` 回执与请求的 provider、model 和显式 effort 一致；不一致时不提交 prompt，错误保留已创建的 Session ID。该 API 还会后台保存 Host 默认选择。回执证明选择已安装，不证明模型请求已执行；实际请求配置以安全事件中的 `request/header` 为依据，子 Agent 设置需另有对应证据。
 
 成功响应包含 `sessionId`、执行目录 `cwd`、`workspace.matched` 和接纳状态；请求过模型或 effort 时还返回 `model`。`workspace.matched: true` 表示命中已有同名工作区，并返回其 `id`；`false` 表示默认的未分组分区，不返回 `id`，属于正常成功。`model.source` 是 `default` 或 `override`。
 
@@ -40,25 +40,35 @@ Host 先通过 `realpath` 规范化目录。传入模型或推理程度时，先
 桥接状态为 `queued`、`running`、`idle`、`completed`、`cancelled`、`error`，不是 Host 自身的 Session 枚举。响应保留原始 `running`、`agentAvailable`、`blank`、`updatedAt`。
 
 - 原始 `running` 优先于旧的 `turn/end`；新的 `turn/start` 清除上一轮终态，之后的 `turn/end` 结束新轮次。
-- `dsh_follow` 默认返回 100 条事件，最大 500 条；消费后保存 `nextCursor`，检查 `truncated`。
+- 持久化 `turn/end.reason` 的 `error`、`aborted` 分别恢复为错误、取消状态；接管历史 Session 不依赖已丢失的实时错误通知。
+- `dsh_follow` 默认返回 100 条事件，最大 500 条，并受每页 16 KiB 事件预算约束；消费后保存 `nextCursor`。`truncated` 只表示保留历史已出现缺口，不表示本页因数量或字节预算尚有后续事件。
 - `dsh_wait` 默认 30 秒，最大 120 秒；超时不取消 Session，断开 HTTP 等待也不取消任务。
 - 事件有界、保存在插件进程内；默认每个 Session 保留 512 条，最多配置 4096 条。
+- 跟踪不订阅 assistant token stream，并过滤 system/user 消息和请求上下文；保留任务结果与生命周期事件，`request/header` 只保留模型配置证据。约 4 KiB 以上单条事件返回预览并标记 `bridgeContentTruncated`，不能把预览当作完整结果。
 - 游标绑定实例、Session 和序号；插件重载后可重新接管已有 Session，但旧游标不能继续使用。
-- 默认最多跟踪 100 个 Session，只淘汰非活跃的 LRU 条目，不因容量淘汰正在执行的任务。
-- 取消分别报告桥接接纳和 Host 原始 `{ accepted: true }`，保留会话与历史，不回滚文件修改。
+- 默认最多跟踪 100 个 Session，创建前预留容量以覆盖并发委托；只淘汰非活跃的 LRU 条目。接管空 Session 不占活跃名额，仍在运行的取消请求不能被淘汰。
+- 取消分别报告桥接接纳和 Host 原始 `{ accepted: true }`；该回执只证明已请求取消，停止以 Host 状态或结束事件为准。保留会话与历史，不回滚文件修改。
+- 插件释放时结束等待并拒绝重建跟踪；重新加载后用新实例和新游标查询。
+
+MCP `dsh_wait` / `dsh_follow` 只通过 `content[0].text` 返回完整的有界 JSON 结果，不再重复写入 `structuredContent`。读取这两个工具 `structuredContent` 的调用方须迁移；其他工具和错误仍保留文本与结构化两通道，HTTP 协议数据不变。
 
 ## 常见错误 / Troubleshooting
 
 | 错误 | 含义与处理 |
 | --- | --- |
-| `HOST_NOT_RUNNING` | `DSH Desktop bridge is not running.` 检查 Desktop、插件启用状态及 `DSH_HOME` 是否一致；桥接不会启动 Desktop |
+| `HOST_NOT_RUNNING` | 发现文件缺失；检查 Desktop、插件启用状态及 `DSH_HOME` 是否一致；桥接不会启动 Desktop |
+| `HOST_CONNECTION_UNREADABLE` / `INVALID_DISCOVERY_FILE` | 发现文件不可读取或格式无效；保留原错误，检查文件与访问权限，不当作 Desktop 未运行 |
+| `HOST_VERSION_MISMATCH` | 发现的桥接版本不匹配；由操作者一起更新插件与 MCP 服务 |
 | `INVALID_CWD` | 路径非绝对、不存在或不是目录；修正为确认过的当前任务目录 |
+| `WORKSPACE_AMBIGUOUS` / `WORKSPACE_CWD_MISMATCH` | 同名工作区多项或目录不等于任务目录；创建前拒绝，由操作者核对工作区配置 |
 | `MODEL_NOT_FOUND` / `DEFAULT_MODEL_UNAVAILABLE` | 模型路由不匹配或无可用默认模型；检查 Host 目录，不切换到猜测模型 |
 | `INVALID_REASONING_EFFORT` | 当前模型不支持该程度；读取错误中的可用值后明确选择 |
 | `SESSION_ADMISSION_FAILED` | Session 已创建，但选择模型或提交 prompt 失败；保留 `details.sessionId` 并检查状态，不自动重复派发 |
 | `CURSOR_EXPIRED` | 插件实例已更换；不传旧游标，重新读取事件 |
 | `TRACKER_CAPACITY` | 当前跟踪容量内的 Session 都活跃；等待任务结束后再委托 |
 | `HOST_TIMEOUT` / `INVALID_HOST_RESPONSE` | 提交结果可能不确定；先核实是否已创建或执行，再考虑重试 |
+
+传输超时或断连不自动重试。现有五个工具只能按已知 `sessionId` 查询；响应丢失且 ID 未知时，在官方 Desktop 中按提交时间、目录和任务文本只读核对，再决定后续操作。没有新增查询任务 ID 或幂等重发工具。
 
 ## 安全与验证 / Security and Verification
 
@@ -85,7 +95,7 @@ pnpm pack:mcp
 | 超时与取消 | 零时限等待返回超时且任务继续运行；取消被 Host 接纳，原始状态转为非运行，会话与事件仍可查询 |
 | 失败边界 | 无鉴权健康检查被拒绝；不存在的目录、不可用模型和不支持的 effort 分别返回明确错误 |
 
-以上为 `0.2.0` 的历史实机验收，Workspace 注册行为已经在 `0.2.1` 移除。`0.2.1` 的同名复用、无匹配未分组、不注册 Workspace 行为由自动测试覆盖；安装后的 Desktop 实机检查仍需操作者执行。第三方插件功能及其他 Desktop / Codex CLI 版本不在此范围内。
+以上为 `0.2.0` 的历史实机验收，Workspace 注册行为已经在 `0.2.1` 移除。`0.2.2` 的目录校验、模型回执、生命周期和事件预算修复使用自动测试验证；尚未安装到真实 Desktop 验收。安装后的实机检查仍需操作者执行。第三方插件功能及其他 Desktop / Codex CLI 版本不在此范围内。
 
 ## 源码导航 / Source Map
 

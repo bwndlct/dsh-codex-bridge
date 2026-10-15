@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2 - 2026-10-08
+
+- Reject ambiguous Workspace titles and canonical directory mismatches before creating a Session; retain ungrouped admission when no title matches.
+- Check the official `selectModel` receipt against the requested route and explicit effort before prompt admission; preserve the Session ID on post-creation failure.
+- Reserve tracking capacity for concurrent admissions, restore error/aborted endings from durable events, retain running cancellation requests, and settle waits during disposal.
+- Filter private conversation context and token streams from events. Keep safe model configuration evidence, bound event pages to 16 KiB, and mark oversized event previews with `bridgeContentTruncated`; cursor `truncated` continues to mean a retained-history gap.
+- Distinguish missing, unreadable, invalid, and incompatible discovery files. Unknown submission outcomes are not retried automatically; reconcile them in Desktop when the Session ID is unavailable.
+- MCP compatibility: `dsh_wait` and `dsh_follow` now return their bounded JSON only in `content[0].text`, without duplicate `structuredContent`. Callers using those tools' `structuredContent` must migrate. Other tool/error channels and HTTP response data are unchanged.
+- Update the Desktop plugin and MCP server together; discovery requires `0.2.2`. Host support remains official Desktop `0.2.0-rc.2`. No live Desktop installation or acceptance was performed for this release.
+
 ## 0.2.1 - 2026-09-30
 
 - Match the canonical Codex directory name to an existing DSH Workspace title, in display order.

@@ -1,6 +1,6 @@
 {
   "name": "@dsh-codex-bridge/mcp-server",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Stdio MCP server that delegates Codex tasks to official DeepSeek Harness Desktop",
   "type": "module",
   "license": "MIT",
